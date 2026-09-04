@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, getApiBase, getToken } from "@/lib/api";
 import type { IncidentDetail, Severity } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -68,8 +68,36 @@ export default function IncidentDetailPage() {
         </p>
         {data.photo_url && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={data.photo_url} alt="incident" className="mt-3 max-h-64 rounded" />
+          <img
+            src={`${getApiBase()}/admin/incidents/${id}/photo?token=${getToken() ?? ""}`}
+            alt="incident"
+            className="mt-3 max-h-64 rounded"
+          />
         )}
+      </Card>
+
+      <Card>
+        <h2 className="mb-2 font-medium">AI verdict</h2>
+        {(() => {
+          const ai = (data.ai_analysis ?? {}) as Record<string, unknown>;
+          return (
+            <div className="text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge value={String(ai.category ?? "—")} />
+                <Badge value={String(ai.severity ?? data.severity)} />
+                <span className="text-zinc-600">
+                  confidence{" "}
+                  {typeof data.ai_confidence === "number"
+                    ? `${Math.round(data.ai_confidence * 100)}%`
+                    : "—"}
+                </span>
+              </div>
+              {typeof ai.reason === "string" && ai.reason && (
+                <p className="mt-2 text-zinc-600">{ai.reason}</p>
+              )}
+            </div>
+          );
+        })()}
       </Card>
 
       <Card>
@@ -82,6 +110,7 @@ export default function IncidentDetailPage() {
           <Button onClick={() => patch.mutate({ status: "rejected" })}>Reject</Button>
           <Button onClick={() => patch.mutate({ status: "escalated" })}>Escalate</Button>
           <Button onClick={() => patch.mutate({ status: "resolved" })}>Resolve</Button>
+          <Button onClick={() => patch.mutate({ status: "closed" })}>Close</Button>
         </div>
         <div className="mt-3 flex gap-2">
           <select

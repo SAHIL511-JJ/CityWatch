@@ -1,7 +1,18 @@
 import math
+import os
 from datetime import datetime
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import func
@@ -22,6 +33,14 @@ from .models import Category, Incident, IncidentNote, Staff, StatusHistory, User
 from .storage import get_storage
 
 app = FastAPI(title=settings.APP_NAME)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 ALLOWED_TYPES = {"image/jpeg": ".jpg", "image/png": ".png"}
 
@@ -83,6 +102,8 @@ def incident_out(i: Incident) -> dict:
         "severity": i.severity,
         "ai_confidence": i.ai_confidence,
         "ai_analysis": i.ai_analysis,
+        "reporter_id": str(i.reporter_id) if i.reporter_id else None,
+        "assigned_to": str(i.assigned_to) if i.assigned_to else None,
         "created_at": i.created_at.isoformat() if i.created_at else None,
     }
 
@@ -401,10 +422,45 @@ def admin_users(
             "email": u.email,
             "verified": u.verified,
             "trust_score": u.trust_score,
+            "banned": bool(getattr(u, "banned", False)),
             "created_at": u.created_at.isoformat() if u.created_at else None,
         }
         for u in rows
     ]
+
+
+class UserPatchIn(BaseModel):
+    verified: bool | None = None
+    trust_score: float | None = None
+    banned: bool | None = None
+
+
+@app.patch("/admin/users/{user_id}")
+def admin_user_patch(
+    user_id: str,
+    body: UserPatchIn,
+    staff: Staff = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+):
+    u = db.get(User, user_id)
+    if u is None:
+        raise HTTPException(404, "not found")
+    if body.verified is not None:
+        u.verified = body.verified
+        if body.verified:
+            u.trust_score = max(u.trust_score, auth.TRUST_VERIFIED)
+    if body.trust_score is not None:
+        u.trust_score = max(0.1, min(1.0, body.trust_score))
+    if body.banned is not None:
+        u.banned = body.banned
+    db.commit()
+    db.refresh(u)
+    return {
+        "id": str(u.id),
+        "verified": u.verified,
+        "trust_score": u.trust_score,
+        "banned": bool(u.banned),
+    }
 
 
 @app.post("/admin/incidents/{incident_id}/analyze")
@@ -422,6 +478,108 @@ def admin_analyze(
     res = run_ai(i.title or "", i.description or "", i.photo_url)
     status = apply_ai_result(db, i, res, changed_by=staff.id)
     return {"id": str(i.id), "status": status, "ai": res}
+
+
+@app.get("/admin/incidents/{incident_id}")
+def admin_get(
+    incident_id: str,
+    staff: Staff = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+):
+    i = db.get(Incident, incident_id)
+    if i is None:
+        raise HTTPException(404, "not found")
+    notes = (
+        db.query(IncidentNote)
+        .filter_by(incident_id=i.id)
+        .order_by(IncidentNote.created_at.asc())
+        .all()
+    )
+    hist = (
+        db.query(StatusHistory)
+        .filter_by(incident_id=i.id)
+        .order_by(StatusHistory.changed_at.asc())
+        .all()
+    )
+    rep = db.get(User, i.reporter_id) if i.reporter_id else None
+    out = incident_out(i)
+    out["reporter"] = (
+        {
+            "id": str(rep.id),
+            "device_id": rep.device_id,
+            "phone": rep.phone,
+            "email": rep.email,
+            "verified": rep.verified,
+            "trust_score": rep.trust_score,
+        }
+        if rep
+        else None
+    )
+    out["notes"] = [
+        {
+            "id": str(n.id),
+            "incident_id": str(n.incident_id),
+            "staff_id": str(n.staff_id) if n.staff_id else None,
+            "note": n.note,
+            "created_at": n.created_at.isoformat() if n.created_at else None,
+        }
+        for n in notes
+    ]
+    out["history"] = [
+        {
+            "id": str(h.id),
+            "incident_id": str(h.incident_id),
+            "old_status": h.old_status,
+            "new_status": h.new_status,
+            "changed_by": str(h.changed_by) if h.changed_by else None,
+            "changed_at": h.changed_at.isoformat() if h.changed_at else None,
+        }
+        for h in hist
+    ]
+    return out
+
+
+@app.get("/admin/incidents/{incident_id}/photo")
+def admin_photo(
+    incident_id: str,
+    token: str | None = Query(None),
+    request: Request = None,  # type: ignore
+    db: Session = Depends(get_db),
+):
+    """Serve incident photo. <img> tags can't send headers, so staff JWT
+    is accepted as ?token= query param (falls back to Bearer header)."""
+    from fastapi.responses import FileResponse, RedirectResponse
+
+    raw = token
+    if not raw and request is not None:
+        hdr = request.headers.get("authorization", "")
+        if hdr.lower().startswith("bearer "):
+            raw = hdr[7:]
+    if not raw:
+        raise HTTPException(401, "missing bearer token")
+    try:
+        data = auth.decode_token(raw)
+    except HTTPException:
+        raise HTTPException(401, "invalid token")
+    if "role" not in data:
+        raise HTTPException(403, "staff only")
+    if db.get(Staff, data.get("sub")) is None:
+        raise HTTPException(401, "unknown staff")
+
+    i = db.get(Incident, incident_id)
+    if i is None or not i.photo_url:
+        raise HTTPException(404, "no photo")
+    key = i.photo_url.replace("\\", "/").strip()
+    if key.startswith(f"{settings.STORAGE_BUCKET}/"):
+        if not settings.SUPABASE_SERVICE_KEY:
+            raise HTTPException(404, "photo unavailable")
+        url = get_storage().signed_url(key.split("/", 1)[1])
+        return RedirectResponse(url, status_code=302)
+    p = key[2:] if key.startswith("./") else key.lstrip("/")
+    if not os.path.exists(p):
+        raise HTTPException(404, "photo file missing")
+    media = "image/png" if p.lower().endswith(".png") else "image/jpeg"
+    return FileResponse(p, media_type=media)
 
 
 @app.get("/admin/analytics/summary")
@@ -443,11 +601,13 @@ def analytics(staff: Staff = Depends(get_current_staff), db: Session = Depends(g
         .group_by(func.date(Incident.created_at))
         .all()
     )
+    total = sum(by_status.values())
     return {
-        "by_category": by_cat,
-        "by_status": by_status,
-        "by_severity": by_sev,
-        "by_day": [{"day": str(d), "count": c} for d, c in by_day_raw],
+        "total": total,
+        "by_category": [{"name": k, "count": v} for k, v in sorted(by_cat.items())],
+        "by_status": [{"status": k, "count": v} for k, v in sorted(by_status.items())],
+        "by_severity": [{"severity": k, "count": v} for k, v in sorted(by_sev.items())],
+        "by_day": [{"date": str(d), "count": c} for d, c in by_day_raw],
     }
 
 

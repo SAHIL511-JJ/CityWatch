@@ -29,7 +29,7 @@ export default function AnalyticsPage() {
 
   const points = (incidents.data ?? [])
     .filter((i) => typeof i.lat === "number" && typeof i.lng === "number")
-    .map((i) => ({ lat: i.lat, lng: i.lng, severity: i.severity }));
+    .map((i) => ({ lat: i.lat, lng: i.lng, severity: i.severity, title: i.title, status: i.status }));
 
   return (
     <div className="space-y-4">
@@ -71,7 +71,7 @@ export default function AnalyticsPage() {
         </div>
       )}
       <Card>
-        <p className="mb-2 text-sm text-zinc-500">Heatmap (circle placeholder)</p>
+        <p className="mb-2 text-sm text-zinc-500">Incident map (color = severity)</p>
         <Heatmap points={points} />
       </Card>
     </div>

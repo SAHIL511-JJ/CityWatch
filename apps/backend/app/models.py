@@ -41,6 +41,7 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     verified: Mapped[bool] = mapped_column(Boolean, default=False)
     trust_score: Mapped[float] = mapped_column(Float, default=0.5)
+    banned: Mapped[bool] = mapped_column(Boolean, default=False)
     fcm_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     alert_radius_km: Mapped[float] = mapped_column(Float, default=5.0)
     min_severity: Mapped[str] = mapped_column(Text, default="medium")

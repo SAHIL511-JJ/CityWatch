@@ -125,6 +125,8 @@ def get_current_user(
     u = db.get(User, token.get("sub"))
     if u is None:
         raise HTTPException(status_code=401, detail="unknown user")
+    if getattr(u, "banned", False):
+        raise HTTPException(status_code=403, detail="account banned")
     return u
 
 

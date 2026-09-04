@@ -34,3 +34,8 @@ build/
 Thumbs.db
 .vscode/
 .idea/
+.playwright-mcp/
+*.png
+wt-backend/
+wt-crm/
+wt-mobile/

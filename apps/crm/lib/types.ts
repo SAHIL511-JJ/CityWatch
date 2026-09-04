@@ -68,5 +68,6 @@ export interface AppUser {
   email?: string | null;
   verified: boolean;
   trust_score: number;
+  banned?: boolean;
   created_at: string;
 }

@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     # Upload guardrails
     MAX_PHOTO_MB: int = 8
 
+    # CORS for browser callers (CRM on :3000). Comma-separated extra origins.
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+
     # S3-style swap (future R2 move = change these only, see storage.py)
     S3_ENDPOINT: str = ""
     S3_BUCKET: str = ""
