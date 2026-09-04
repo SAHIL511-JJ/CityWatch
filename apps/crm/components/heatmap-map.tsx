@@ -45,7 +45,10 @@ export function HeatmapMap({ points }: { points: HeatPoint[] }) {
       center={center}
       zoom={points.length > 0 ? 11 : 4}
       style={{ height: 320, width: "100%" }}
-    >      <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+    >      <TileLayer
+        url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
+        attribution="Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom"
+      />
       <FitToPoints pts={points.map((p) => [p.lat, p.lng])} />
       {points.map((p, i) => (
         <CircleMarker
@@ -53,8 +56,10 @@ export function HeatmapMap({ points }: { points: HeatPoint[] }) {
           center={[p.lat, p.lng]}
           radius={12}
           pathOptions={{
-            color: severityColor[p.severity] ?? "#666",
-            fillOpacity: 0.4,
+            color: "#ffffff",
+            weight: 2,
+            fillColor: severityColor[p.severity] ?? "#666",
+            fillOpacity: 0.9,
           }}
         >
           {(p.title || p.status) && (
