@@ -10,10 +10,11 @@ Snap a photo, report crime / hazards / city issues, browse verified reports on a
 ## Quick start
 
 ### 1. Supabase
-1. Create project at supabase.com
-2. SQL Editor → run `supabase/migrations/001_init.sql`, then `supabase/seed.sql`
-3. Storage → new private bucket `incident-photos`
-4. Copy: project URL, service key, pooler (6543) + direct (5432) DB URLs
+Repo is linked in the Supabase dashboard (repo connect), so pushing
+`supabase/migrations/*.sql` auto-applies to the DB. Manual fallback:
+SQL Editor → run `supabase/migrations/*.sql` in order, then `supabase/seed.sql`.
+Storage → private bucket `incident-photos` (needs service key for real
+uploads; without it photos save to backend `./uploads`).
 
 ### 2. Backend
 ```bash
