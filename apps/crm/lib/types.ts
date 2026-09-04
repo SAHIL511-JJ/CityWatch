@@ -43,9 +43,19 @@ export interface StatusHistoryEntry {
   changed_at: string;
 }
 
+export interface IncidentReporter {
+  id: string;
+  device_id?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  verified: boolean;
+  trust_score: number;
+}
+
 export interface IncidentDetail extends Incident {
   notes: IncidentNote[];
   history: StatusHistoryEntry[];
+  reporter?: IncidentReporter | null;
 }
 
 export interface AnalyticsSummary {
