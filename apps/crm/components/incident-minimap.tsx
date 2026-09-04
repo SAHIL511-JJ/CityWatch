@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import L from "leaflet";
 import { Circle, CircleMarker, MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
+import { ZoomHandlers } from "./leaflet-controls";
 
 const severityColor: Record<string, string> = {
   low: "#22c55e",
@@ -165,6 +166,7 @@ export function IncidentMiniMap({
             </>
           )}
           <MiniMapControls fs={fs} setFs={setFs} setFound={setFound} setErr={setErr} />
+          <ZoomHandlers />
         </MapContainer>
       </div>
       {err && <p className="mt-2 text-xs text-red-600">{err}</p>}

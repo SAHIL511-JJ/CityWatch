@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import L from "leaflet";
 import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from "react-leaflet";
+import { ZoomHandlers } from "./leaflet-controls";
 
 export interface HeatPoint {
   lat: number;
@@ -87,6 +88,7 @@ export function HeatmapMap({ points }: { points: HeatPoint[] }) {
       />
       <FitToPoints pts={points.map((p) => [p.lat, p.lng])} />
       <FsControl fs={fs} setFs={setFs} />
+      <ZoomHandlers />
       {points.map((p, i) => (
         <CircleMarker
           key={i}
