@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, getApiBase, getToken } from "@/lib/api";
@@ -24,6 +24,14 @@ export default function IncidentDetailPage() {
   const [assignee, setAssignee] = useState("");
   const [zoom, setZoom] = useState(false);
 
+  // reset local edits when switching incidents
+  useEffect(() => {
+    setNote("");
+    setSeverity("");
+    setAssignee("");
+    setZoom(false);
+  }, [id]);
+
   const { data, isLoading, error } = useQuery({
     queryKey: ["admin-incident", id],
     queryFn: () => apiFetch<IncidentDetail>(`/admin/incidents/${id}`),
@@ -31,8 +39,7 @@ export default function IncidentDetailPage() {
 
   const refresh = () => qc.invalidateQueries({ queryKey: ["admin-incident", id] });
 
-  const patch = useMutation({
-    mutationFn: (body: Record<string, unknown>) =>
+  const patch = useMutation({    mutationFn: (body: Record<string, unknown>) =>
       apiFetch(`/admin/incidents/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     onSuccess: refresh,
   });
@@ -47,14 +54,6 @@ export default function IncidentDetailPage() {
       setNote("");
       refresh();
     },
-  });
-
-  const analyze = useMutation({
-    mutationFn: () =>
-      apiFetch<{ status: string }>(`/admin/incidents/${id}/analyze`, {
-        method: "POST",
-      }),
-    onSuccess: refresh,
   });
 
   if (isLoading) return <p>Loading…</p>;
@@ -157,33 +156,39 @@ export default function IncidentDetailPage() {
         <div className="space-y-5 lg:col-span-2">
           <Card>
             <SectionTitle>Moderate</SectionTitle>
+            <p className="mb-1 text-xs font-medium text-zinc-500">Set status</p>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={() => analyze.mutate()} disabled={analyze.isPending}>
-                {analyze.isPending ? "Analyzing…" : "Run AI analysis"}
-              </Button>
-            </div>
-            <p className="mb-1 mt-4 text-xs font-medium text-zinc-500">Set status</p>
-            <div className="flex flex-wrap gap-2">
-              <Button onClick={() => patch.mutate({ status: "verified" })}>Approve</Button>
-              <Button onClick={() => patch.mutate({ status: "rejected" })}>Reject</Button>
-              <Button onClick={() => patch.mutate({ status: "escalated" })}>Escalate</Button>
-              <Button onClick={() => patch.mutate({ status: "resolved" })}>Resolve</Button>
-              <Button onClick={() => patch.mutate({ status: "closed" })}>Close</Button>
+              {(
+                [
+                  ["verified", "Approve"],
+                  ["rejected", "Reject"],
+                  ["escalated", "Escalate"],
+                  ["resolved", "Resolve"],
+                  ["closed", "Close"],
+                ] as const
+              ).map(([status, label]) => (
+                <Button
+                  key={status}
+                  disabled={data.status === status || patch.isPending}
+                  onClick={() => patch.mutate({ status })}
+                >
+                  {label}
+                </Button>
+              ))}
             </div>
             <div className="mt-3 flex gap-2">
               <select
                 className="rounded-md border px-3 py-2 text-sm"
-                value={severity}
+                value={severity === "" ? data.severity : severity}
                 onChange={(e) => setSeverity(e.target.value as Severity | "")}
               >
-                <option value="">severity…</option>
                 <option value="low">low</option>
                 <option value="medium">medium</option>
                 <option value="high">high</option>
                 <option value="critical">critical</option>
               </select>
               <Button
-                disabled={!severity}
+                disabled={!severity || severity === data.severity}
                 onClick={() => severity && patch.mutate({ severity })}
               >
                 Save
