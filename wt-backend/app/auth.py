@@ -38,7 +38,7 @@ def verify_password(pw: str, h: str) -> bool:
 
 def create_token(sub: str, extra: dict | None = None) -> str:
     payload = {
-        "sub": sub,
+        "sub": str(sub),
         "exp": datetime.utcnow() + timedelta(minutes=settings.JWT_EXPIRE_MIN),
     }
     if extra:

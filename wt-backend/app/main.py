@@ -72,7 +72,7 @@ def haversine_km(lat1, lng1, lat2, lng2) -> float:
 
 def incident_out(i: Incident) -> dict:
     return {
-        "id": i.id,
+        "id": str(i.id),
         "title": i.title,
         "description": i.description,
         "photo_url": i.photo_url,
@@ -149,7 +149,7 @@ def anonymous(body: AnonymousIn, db: Session = Depends(get_db)):
         u.fcm_token = body.fcm_token
         db.commit()
     token = create_token(u.id, {"verified": u.verified, "trust": u.trust_score})
-    return {"token": token, "user_id": u.id, "verified": u.verified}
+    return {"token": token, "user_id": str(u.id), "verified": u.verified}
 
 
 @app.post("/auth/send-code")
@@ -194,7 +194,7 @@ def verify(body: VerifyIn, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(u)
     token = create_token(u.id, {"verified": True, "trust": u.trust_score})
-    return {"token": token, "user_id": u.id, "verified": True}
+    return {"token": token, "user_id": str(u.id), "verified": True}
 
 
 # ---------- incidents ----------
@@ -261,7 +261,7 @@ def create_incident(
     )
     db.commit()
     enqueue_analysis(inc.id)
-    return {"id": inc.id, "status": inc.status, "photo_url": photo_url}
+    return {"id": str(inc.id), "status": inc.status, "photo_url": photo_url}
 
 
 @app.get("/incidents")
@@ -371,7 +371,7 @@ def admin_note(
     db.commit()
     db.refresh(n)
     return {
-        "id": n.id,
+        "id": str(n.id),
         "note": n.note,
         "created_at": n.created_at.isoformat() if n.created_at else None,
     }
@@ -384,7 +384,7 @@ def admin_users(
     rows = db.query(User).order_by(User.created_at.desc()).limit(200).all()
     return [
         {
-            "id": u.id,
+            "id": str(u.id),
             "device_id": u.device_id,
             "phone": u.phone,
             "email": u.email,

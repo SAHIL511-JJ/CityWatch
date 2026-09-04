@@ -1,0 +1,23 @@
+name: apply-migrations
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/**"
+      - "scripts/apply_migrations.py"
+      - ".github/workflows/apply-migrations.yml"
+  workflow_dispatch: {}
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install psycopg2-binary
+      - run: python scripts/apply_migrations.py
+        env:
+          SUPABASE_DB_URL_DIRECT: ${{ secrets.SUPABASE_DB_URL_DIRECT }}
