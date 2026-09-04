@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import L from "leaflet";
 import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from "react-leaflet";
 
@@ -12,10 +12,29 @@ export interface HeatPoint {
   status?: string;
 }
 
-export interface HeatPoint {
-  lat: number;
-  lng: number;
-  severity: string;
+function FsControl({ fs, setFs }: { fs: boolean; setFs: (v: boolean) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    const t = setTimeout(() => map.invalidateSize(), 100);
+    return () => clearTimeout(t);
+  }, [map, fs]);
+  return (
+    <div className="absolute right-3 top-3 z-[800]">
+      <button
+        title={fs ? "Exit fullscreen" : "Fullscreen map"}
+        aria-label={fs ? "Exit fullscreen" : "Fullscreen map"}
+        onClick={(e) => {
+          e.stopPropagation();
+          setFs(!fs);
+        }}
+        className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-700 shadow-sm hover:bg-zinc-100"
+      >
+        <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
+          <path d="M8 3H3v5M12 17h5v-5M3 3l6 6M17 17l-6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+    </div>
+  );
 }
 
 const severityColor: Record<string, string> = {
@@ -39,17 +58,35 @@ export function HeatmapMap({ points }: { points: HeatPoint[] }) {
   // real center instead of staying stuck at the [0,0] fallback.
   const center: [number, number] =
     points.length > 0 ? [points[0].lat, points[0].lng] : [21.0, 78.0];
+  const [fs, setFs] = useState(false);
+
+  useEffect(() => {
+    if (!fs) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFs(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fs]);
+
   return (
-    <MapContainer
-      key={center.join(",")}
-      center={center}
-      zoom={points.length > 0 ? 11 : 4}
-      style={{ height: 320, width: "100%" }}
-    >      <TileLayer
+    <div className={fs ? "fixed inset-0 z-[70] bg-white p-4" : "relative"}>
+      {fs && <p className="mb-2 text-sm font-medium text-zinc-600">Incident map — Esc to exit</p>}
+      <div>
+        <MapContainer
+          key={`${center.join(",")}-${fs ? "fs" : "inline"}`}
+          center={center}
+          zoom={points.length > 0 ? 11 : 4}
+          style={{
+            height: fs && typeof window !== "undefined" ? window.innerHeight - 90 : 320,
+            width: "100%",
+          }}
+        >      <TileLayer
         url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
         attribution="Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom"
       />
       <FitToPoints pts={points.map((p) => [p.lat, p.lng])} />
+      <FsControl fs={fs} setFs={setFs} />
       {points.map((p, i) => (
         <CircleMarker
           key={i}
@@ -71,6 +108,8 @@ export function HeatmapMap({ points }: { points: HeatPoint[] }) {
           )}
         </CircleMarker>
       ))}
-    </MapContainer>
+        </MapContainer>
+      </div>
+    </div>
   );
 }
