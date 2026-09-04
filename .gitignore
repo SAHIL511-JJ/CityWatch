@@ -1,0 +1,36 @@
+# Secrets — never commit (matches at any depth)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python / FastAPI
+*.pyc
+*.pyo
+__pycache__/
+.ruff_cache/
+.pytest_cache/
+.venv/
+venv/
+dev.db
+uploads/
+t.jpg
+
+# Node / Next.js CRM
+node_modules/
+.next/
+out/
+*.log
+
+# Flutter
+.dart_tool/
+.build/
+build/
+.pub-cache/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
