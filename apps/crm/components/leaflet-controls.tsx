@@ -34,7 +34,8 @@ export function ZoomHandlers() {
       e.stopPropagation();
       const dir = e.deltaY > 0 ? -1 : 1;
       const at = map.mouseEventToContainerPoint(e);
-      const next = map.getZoom() + dir * 0.6;
+      // clamp to tile coverage: past z18 Esri serves "Map Data Not Available"
+      const next = Math.min(18, Math.max(3, map.getZoom() + dir * 0.6));
       map.setZoomAround(at, next);
     };
     el.addEventListener("wheel", onWheel, { passive: false });

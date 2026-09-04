@@ -131,6 +131,8 @@ export function IncidentMiniMap({
           key={`mini-${fs ? "fs" : "inline"}`}
           center={[lat, lng]}
           zoom={15}
+          minZoom={3}
+          maxZoom={18}
           scrollWheelZoom={false}
           style={{
             height: fs && typeof window !== "undefined" ? window.innerHeight - 90 : 280,
@@ -139,6 +141,7 @@ export function IncidentMiniMap({
         >
           <TileLayer
             url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
+            maxNativeZoom={17}
             attribution="Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom"
           />
           <CircleMarker

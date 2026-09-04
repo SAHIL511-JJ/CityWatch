@@ -78,12 +78,15 @@ export function HeatmapMap({ points }: { points: HeatPoint[] }) {
           key={`${center.join(",")}-${fs ? "fs" : "inline"}`}
           center={center}
           zoom={points.length > 0 ? 11 : 4}
+          minZoom={3}
+          maxZoom={18}
           style={{
             height: fs && typeof window !== "undefined" ? window.innerHeight - 90 : 320,
             width: "100%",
           }}
         >      <TileLayer
         url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}"
+        maxNativeZoom={17}
         attribution="Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom"
       />
       <FitToPoints pts={points.map((p) => [p.lat, p.lng])} />
