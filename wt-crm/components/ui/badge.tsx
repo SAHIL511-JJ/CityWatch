@@ -1,0 +1,28 @@
+import { cn } from "@/lib/utils";
+
+const colors: Record<string, string> = {
+  processing: "bg-yellow-100 text-yellow-800",
+  needs_review: "bg-orange-100 text-orange-800",
+  verified: "bg-green-100 text-green-800",
+  rejected: "bg-red-100 text-red-800",
+  escalated: "bg-purple-100 text-purple-800",
+  resolved: "bg-blue-100 text-blue-800",
+  closed: "bg-zinc-200 text-zinc-700",
+  low: "bg-zinc-100 text-zinc-700",
+  medium: "bg-yellow-100 text-yellow-800",
+  high: "bg-orange-100 text-orange-800",
+  critical: "bg-red-100 text-red-800",
+};
+
+export function Badge({ value }: { value: string }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
+        colors[value] ?? "bg-zinc-100 text-zinc-700"
+      )}
+    >
+      {value}
+    </span>
+  );
+}
