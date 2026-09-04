@@ -41,6 +41,14 @@ export default function IncidentDetailPage() {
     },
   });
 
+  const analyze = useMutation({
+    mutationFn: () =>
+      apiFetch<{ status: string }>(`/admin/incidents/${id}/analyze`, {
+        method: "POST",
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-incident", id] }),
+  });
+
   if (isLoading) return <p>Loading…</p>;
   if (error) return <p className="text-red-600">{(error as Error).message}</p>;
   if (!data) return <p>Not found</p>;
@@ -67,6 +75,9 @@ export default function IncidentDetailPage() {
       <Card>
         <h2 className="mb-2 font-medium">Moderate</h2>
         <div className="flex flex-wrap gap-2">
+          <Button onClick={() => analyze.mutate()} disabled={analyze.isPending}>
+            {analyze.isPending ? "Analyzing…" : "Run AI analysis"}
+          </Button>
           <Button onClick={() => patch.mutate({ status: "verified" })}>Approve</Button>
           <Button onClick={() => patch.mutate({ status: "rejected" })}>Reject</Button>
           <Button onClick={() => patch.mutate({ status: "escalated" })}>Escalate</Button>

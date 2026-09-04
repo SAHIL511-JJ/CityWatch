@@ -159,10 +159,45 @@ def send_fcm_stub(tokens: list[str], title: str, body: str) -> None:
     messaging.send_each_for_multicast(msg)
 
 
+def apply_ai_result(db, inc, res: dict, changed_by=None) -> str:
+    """Shared status update used by Celery task and sync admin endpoint."""
+    from .models import StatusHistory, User
+
+    conf = float(res["confidence"])
+    old = inc.status
+    if not res["is_legitimate"]:
+        inc.status = "rejected"
+    elif conf >= 0.7:
+        inc.status = "verified"
+    else:
+        inc.status = "needs_review"
+    inc.severity = res["severity"]
+    inc.ai_confidence = conf
+    inc.ai_analysis = res
+    if inc.reporter_id:
+        u = db.get(User, inc.reporter_id)
+        if u is not None:
+            u.trust_score = max(
+                0.1,
+                min(1.0, u.trust_score + (0.02 if inc.status == "verified" else -0.05)),
+            )
+    db.add(
+        StatusHistory(
+            incident_id=inc.id,
+            old_status=old,
+            new_status=inc.status,
+            changed_by=changed_by,
+        )
+    )
+    db.commit()
+    db.refresh(inc)
+    return inc.status
+
+
 @celery.task(name="analyze_incident", bind=True, max_retries=3)
 def analyze_incident(self, incident_id: str) -> dict:
     from .db import SessionLocal
-    from .models import Incident, StatusHistory, User
+    from .models import Incident, User
 
     db = SessionLocal()
     try:
@@ -170,37 +205,7 @@ def analyze_incident(self, incident_id: str) -> dict:
         if inc is None:
             return {"ok": False, "error": "not found"}
         res = run_ai(inc.title or "", inc.description or "", inc.photo_url)
-        conf = float(res["confidence"])
-        old = inc.status
-        if not res["is_legitimate"]:
-            inc.status = "rejected"
-        elif conf >= 0.7:
-            inc.status = "verified"
-        else:
-            inc.status = "needs_review"
-        inc.severity = res["severity"]
-        inc.ai_confidence = conf
-        inc.ai_analysis = res
-        # trust-score nudge for the reporter
-        if inc.reporter_id:
-            u = db.get(User, inc.reporter_id)
-            if u is not None:
-                u.trust_score = max(
-                    0.1,
-                    min(
-                        1.0,
-                        u.trust_score + (0.02 if inc.status == "verified" else -0.05),
-                    ),
-                )
-        db.add(
-            StatusHistory(
-                incident_id=inc.id,
-                old_status=old,
-                new_status=inc.status,
-                changed_by=None,
-            )
-        )
-        db.commit()
+        status = apply_ai_result(db, inc, res)
         # nearby push stub: users within 10km whose threshold allows it
         if inc.status == "verified" and inc.severity in ("high", "critical"):
             try:
@@ -215,7 +220,7 @@ def analyze_incident(self, incident_id: str) -> dict:
                 )
             except Exception as e:
                 print(f"[fcm] failed: {e}")
-        return {"ok": True, "status": inc.status, "ai": res}
+        return {"ok": True, "status": status, "ai": res}
     except Exception as e:
         db.rollback()
         raise self.retry(exc=e, countdown=10)

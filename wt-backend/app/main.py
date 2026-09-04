@@ -88,13 +88,24 @@ def incident_out(i: Incident) -> dict:
 
 
 def enqueue_analysis(incident_id: str) -> None:
-    """Best-effort Celery enqueue; falls back silently when Redis is absent."""
+    """Best-effort Celery enqueue; never blocks the request when Redis is absent."""
+    try:
+        import socket
+        from urllib.parse import urlparse
+
+        pr = urlparse(settings.REDIS_URL)
+        sock = socket.create_connection(
+            (pr.hostname or "localhost", pr.port or 6379), timeout=1
+        )
+        sock.close()
+    except Exception:
+        return  # dev/sqlite or no-Redis boot: incident stays `processing` until /analyze
     try:
         from .worker import analyze_incident
 
-        getattr(analyze_incident, "delay")(incident_id)
+        getattr(analyze_incident, "delay")(str(incident_id))
     except Exception:
-        pass  # dev/sqlite boot without Redis: incident stays `processing`
+        pass
 
 
 def seed() -> None:
@@ -256,7 +267,7 @@ def create_incident(
             incident_id=inc.id,
             old_status=None,
             new_status="processing",
-            changed_by=user.id,
+            changed_by=None,  # citizen-created; reporter tracked via reporter_id
         )
     )
     db.commit()
@@ -394,6 +405,23 @@ def admin_users(
         }
         for u in rows
     ]
+
+
+@app.post("/admin/incidents/{incident_id}/analyze")
+def admin_analyze(
+    incident_id: str,
+    staff: Staff = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+):
+    """Sync AI analysis (no Redis needed). Runs Gemini now, updates status."""
+    from .worker import apply_ai_result, run_ai
+
+    i = db.get(Incident, incident_id)
+    if i is None:
+        raise HTTPException(404, "not found")
+    res = run_ai(i.title or "", i.description or "", i.photo_url)
+    status = apply_ai_result(db, i, res, changed_by=staff.id)
+    return {"id": str(i.id), "status": status, "ai": res}
 
 
 @app.get("/admin/analytics/summary")
