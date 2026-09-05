@@ -920,13 +920,49 @@ def analytics(staff: Staff = Depends(get_current_staff), db: Session = Depends(g
         .group_by(func.date(Incident.created_at))
         .all()
     )
+    by_day_status_raw = (
+        db.query(func.date(Incident.created_at), Incident.status, func.count())
+        .group_by(func.date(Incident.created_at), Incident.status)
+        .all()
+    )
+    by_day_sev_raw = (
+        db.query(func.date(Incident.created_at), Incident.severity, func.count())
+        .group_by(func.date(Incident.created_at), Incident.severity)
+        .all()
+    )
+    open_statuses = {"processing", "needs_review", "verified", "escalated"}
+    per_day: dict = {}
+    for d, c in by_day_raw:
+        per_day[str(d)] = {
+            "date": str(d),
+            "count": int(c),
+            "resolved": 0,
+            "open": 0,
+            "critical": 0,
+        }
+    for d, s, c in by_day_status_raw:
+        key = str(d)
+        entry = per_day.setdefault(
+            key, {"date": key, "count": 0, "resolved": 0, "open": 0, "critical": 0}
+        )
+        if str(s) == "resolved":
+            entry["resolved"] = int(c)
+        if str(s) in open_statuses:
+            entry["open"] = int(entry["open"]) + int(c)
+    for d, s, c in by_day_sev_raw:
+        key = str(d)
+        entry = per_day.setdefault(
+            key, {"date": key, "count": 0, "resolved": 0, "open": 0, "critical": 0}
+        )
+        if str(s) == "critical":
+            entry["critical"] = int(c)
     total = sum(by_status.values())
     return {
         "total": total,
         "by_category": [{"name": k, "count": v} for k, v in sorted(by_cat.items())],
         "by_status": [{"status": k, "count": v} for k, v in sorted(by_status.items())],
         "by_severity": [{"severity": k, "count": v} for k, v in sorted(by_sev.items())],
-        "by_day": [{"date": str(d), "count": c} for d, c in by_day_raw],
+        "by_day": [per_day[k] for k in sorted(per_day)],
     }
 
 
