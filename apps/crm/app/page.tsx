@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import type { AnalyticsSummary, Incident } from "@/lib/types";
@@ -103,6 +104,7 @@ function Kpi({
 }
 
 export default function DashboardPage() {
+  const [activeCat, setActiveCat] = useState<number | null>(null);
   const summary = useQuery({
     queryKey: ["admin-summary"],
     queryFn: () => apiFetch<AnalyticsSummary>("/admin/analytics/summary"),
@@ -153,6 +155,10 @@ export default function DashboardPage() {
   const byCat = data?.by_category ?? [];
   const bySev = data?.by_severity ?? [];
   const byDay = [...(data?.by_day ?? [])].sort((a, b) => (a.date < b.date ? -1 : 1));
+  const sparkTotal = byDay.map((d) => ({ date: d.date, count: d.count }));
+  const sparkOpen = byDay.map((d) => ({ date: d.date, count: d.open ?? 0 }));
+  const sparkResolved = byDay.map((d) => ({ date: d.date, count: d.resolved ?? 0 }));
+  const sparkCritical = byDay.map((d) => ({ date: d.date, count: d.critical ?? 0 }));
   const statusCount = (s: string) => byStatus.find((x) => x.status === s)?.count ?? 0;
   const sevCount = (s: string) => bySev.find((x) => x.severity === s)?.count ?? 0;
   const open = statusCount("processing") + statusCount("needs_review") + statusCount("verified") + statusCount("escalated");
@@ -196,6 +202,7 @@ export default function DashboardPage() {
       : escalated > 0
         ? `${escalated} escalated — needs action`
         : "queue is clear";
+  const activeEntry = activeCat !== null ? byCat[activeCat] : undefined;
 
   return (
     <div className="space-y-5" style={FONT}>
@@ -248,10 +255,10 @@ export default function DashboardPage() {
       )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi label="Total incidents" value={total} sub={`${byCat.length} categories reporting · ${delta}`} spark={byDay} accent="#14231a" />
-        <Kpi label="Needs attention" value={open} sub={attentionSub} spark={byDay} accent="#d97706" />
-        <Kpi label="Resolved" value={resolved} sub={total ? `${Math.round((resolved / Math.max(1, total)) * 100)}% clearance rate` : "No resolutions yet"} spark={byDay} accent="#15803d" />
-        <Kpi label="Critical severity" value={critical} sub={`${sevCount("high")} high-severity alongside · ${delta}`} spark={byDay} accent="#dc2626" />
+        <Kpi label="Total incidents" value={total} sub={`${byCat.length} categories reporting · ${delta}`} spark={sparkTotal} accent="#14231a" />
+        <Kpi label="Needs attention" value={open} sub={attentionSub} spark={sparkOpen} accent="#d97706" />
+        <Kpi label="Resolved" value={resolved} sub={total ? `${Math.round((resolved / Math.max(1, total)) * 100)}% clearance rate` : "No resolutions yet"} spark={sparkResolved} accent="#15803d" />
+        <Kpi label="Critical severity" value={critical} sub={`${sevCount("high")} high-severity alongside · ${delta}`} spark={sparkCritical} accent="#dc2626" />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
@@ -314,24 +321,52 @@ export default function DashboardPage() {
               <div className="relative h-44 w-44 shrink-0">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
-                    <Pie data={byCat} dataKey="count" nameKey="name" innerRadius={52} outerRadius={80} paddingAngle={2} isAnimationActive={false}>
+                    <Pie
+                      data={byCat}
+                      dataKey="count"
+                      nameKey="name"
+                      innerRadius={52}
+                      outerRadius={80}
+                      paddingAngle={2}
+                      isAnimationActive={false}
+                      onMouseEnter={(_, i) => setActiveCat(i)}
+                      onMouseLeave={() => setActiveCat(null)}
+                    >
                       {byCat.map((_, i) => (
-                        <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />
+                        <Cell
+                          key={i}
+                          fill={DONUT_COLORS[i % DONUT_COLORS.length]}
+                          opacity={activeCat === null || activeCat === i ? 1 : 0.35}
+                        />
                       ))}
                     </Pie>
-                    <Tooltip formatter={(v, name) => [`${v} reports`, name]} />
                   </PieChart>
                 </ResponsiveContainer>
                 <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                  <span className="text-2xl font-bold tabular-nums text-[#14231a]">{count(byCat)}</span>
-                  <span className="text-[11px] text-zinc-500">reports</span>
+                  {activeEntry ? (
+                    <>
+                      <span className="text-2xl font-bold tabular-nums capitalize text-[#14231a]">{activeEntry.count}</span>
+                      <span className="max-w-24 truncate text-[11px] capitalize text-zinc-500">{activeEntry.name}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-2xl font-bold tabular-nums text-[#14231a]">{count(byCat)}</span>
+                      <span className="text-[11px] text-zinc-500">reports</span>
+                    </>
+                  )}
                 </div>
               </div>
               <ul className="min-w-0 flex-1 space-y-1.5 text-sm">
                 {byCat.slice(0, 6).map((c, i) => {
                   const pct = total ? Math.round((c.count / total) * 100) : 0;
                   return (
-                    <li key={c.name} className="flex items-center justify-between gap-2" title={`${c.count} reports · ${pct}% of all incidents`}>
+                    <li
+                      key={c.name}
+                      className="flex items-center justify-between gap-2"
+                      title={`${c.count} reports · ${pct}% of all incidents`}
+                      onMouseEnter={() => setActiveCat(i)}
+                      onMouseLeave={() => setActiveCat(null)}
+                    >
                       <span className="flex min-w-0 items-center gap-2">
                         <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: DONUT_COLORS[i % DONUT_COLORS.length] }} />
                         <span className="capitalize">{c.name}</span>

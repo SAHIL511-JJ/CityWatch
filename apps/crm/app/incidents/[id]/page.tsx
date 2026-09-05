@@ -487,9 +487,57 @@ export default function IncidentDetailPage() {
                   />
                 </div>
                 <p className="mt-2 text-xs text-zinc-500">
+                  {data.address ? `${data.address} · ` : ""}
                   {data.lat}, {data.lng}
-                  {data.address ? ` · ${data.address}` : ""}
                 </p>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                      data.address ? `${data.address}` : `${data.lat},${data.lng}`
+                    )}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center justify-center rounded-md bg-[#14231a] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#2a4a33]"
+                  >
+                    Open in Google Maps
+                  </a>
+                  <a
+                    href={`https://www.google.com/maps/dir/?api=1&destination=${data.lat},${data.lng}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center justify-center rounded-md bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-100"
+                  >
+                    Directions
+                  </a>
+                  <button
+                    onClick={() => {
+                      const link = `https://www.google.com/maps/search/?api=1&query=${data.lat},${data.lng}`;
+                      navigator.clipboard?.writeText(link).then(
+                        () => setToast({ msg: "Location link copied", undo: () => setToast(null) }),
+                        () => setToast({ msg: "Copy failed", undo: () => setToast(null) })
+                      );
+                    }}
+                    className="inline-flex items-center justify-center rounded-md bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-100"
+                  >
+                    Copy link
+                  </button>
+                  {typeof navigator !== "undefined" && "share" in navigator && (
+                    <button
+                      onClick={() =>
+                        navigator
+                          .share({
+                            title: data.title,
+                            text: `${data.title} — ${data.address ?? `${data.lat}, ${data.lng}`}`,
+                            url: `https://www.google.com/maps/search/?api=1&query=${data.lat},${data.lng}`,
+                          })
+                          .catch(() => {})
+                      }
+                      className="inline-flex items-center justify-center rounded-md bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-100"
+                    >
+                      Share
+                    </button>
+                  )}
+                </div>
               </>
             ) : (
               <p className="text-sm text-zinc-500">No coordinates on this report.</p>
