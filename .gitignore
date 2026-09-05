@@ -36,6 +36,7 @@ Thumbs.db
 .idea/
 .playwright-mcp/
 *.png
+screenshots/
 wt-backend/
 wt-crm/
 wt-mobile/

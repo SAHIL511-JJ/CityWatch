@@ -1,126 +1,136 @@
-# AGENTS.md — CityWatch contributor guide
+# CLAUDE.md
 
-Read this before changing anything. Citizen incident reporting:
-Flutter app + FastAPI backend + Next.js CRM + Supabase Postgres/PostGIS.
-Repo: `SAHIL511-JJ/CityWatch`. Live local ports: API `8000`, CRM `3000`.
+**The user's name is Sahil.** Address them as Sahil (the git/email account may show a different name).
 
-## Repo map
+## Rule 0: Always greet first
 
-- `apps/backend/` — FastAPI + Celery worker (port 8000)
-- `apps/crm/` — Next.js 14 CRM (port 3000, `NEXT_PUBLIC_API_URL=http://localhost:8000`)
-- `apps/mobile/` — Flutter citizen app (scaffold; default API `http://10.0.2.2:8000`)
-- `supabase/migrations/` — numbered SQL, applied in order; `supabase/seed.sql` categories
-- `scripts/apply_migrations.py` — local migration runner fallback
-- `vault_Citywatch/` — Obsidian notes, gitignored, never commit
-- No `.cursor/rules`, `.cursorrules`, or copilot instructions exist; this file is canonical.
+**Begin every response with "Ok Sahil" before continuing with anything else.** No exceptions.
 
-## Backend (`apps/backend`)
+## Rule 0.5: Confirm understanding before acting
 
-```bash
-pip install -r requirements.txt
-cp .env.example .env   # fill SUPABASE_*, JWT_SECRET, GEMINI_API_KEY
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-celery -A app.worker.celery worker --loglevel=info   # AI worker (needs REDIS_URL)
+**Right after "Ok Sahil," restate two things — every reply, no exceptions:**
+- **What I understood** from your prompt (in my own words).
+- **What I'm going to do** about it.
+
+Only then proceed. This lets you catch a misread before I act on it. Keep it short — roughly 1–5 sentences, not a hard cap, just don't write a wall of text.
+
+## Rule 1: Read the vault first
+
+Project context, architecture, conventions, and credentials live in the **obsidian-travelseasons** vault (MCP). Read it at the start of a session before working.
+
+## Rule 2: Migrations go through a PR — never straight to main
+
+Merging to `main` **auto-deploys migrations to the production database** (Supabase GitHub integration). So:
+
+- Every schema change is a file in `supabase/migrations/` named `<YYYYMMDDHHMMSS>_<name>.sql` using the **exact Supabase migration version** — repo files map 1:1 to the dashboard. Never let the repo drift from the live DB (applying via the MCP without writing the file is how it drifts).
+- **The `<YYYYMMDDHHMMSS>` is a real current UTC timestamp — never a made-up/placeholder time.** When the migration fixes a tracked ticket, include its key in `<name>` (e.g. `20260615051206_travelseas_149_fix_birthday_this_week_window.sql`).
+- **Never push migration changes directly to `main`.** Open a **PR**, let the **Supabase preview branch** run them on a throwaway DB, and **merge only when that check is green.**
+
+## Rule 2.5: One worktree, only when told, closed out after merge
+
+**Never create a git branch or worktree unless Sahil explicitly tells you to. Ask first, every time.**
+
+When told to start one:
+- Make exactly **one** worktree, right then — not a new one per ticket/issue that comes up later in the same session.
+- Do all of that session's work in that same worktree. Don't spin up additional ones.
+- Track which worktree is the active one — don't lose it.
+- Never merge it into `dev` until Sahil explicitly says so.
+- Once it's merged, remove that worktree (and its branch) so it doesn't linger — clean up the one you just finished, not anything else.
+
+
+## Rule 4: Exactly ONE process per backend — never `--reload`
+
+**One process per server (TS API :8000, Reelcraft :8001), no exceptions.** Never run uvicorn with `--reload` on this machine — on Windows it spawns a hidden worker that survives kills and keeps serving stale code. Before starting a server: kill the old one, verify **zero** leftover `spawn_main` pythons and **exactly one** listener on the port. After backend edits, restart manually.
+
+**ALWAYS launch the TS API from its `.venv`, NEVER plain global `python`.** Start it with `apps\api\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000` (CWD = `apps/api`). The global Python311 has drifted **stale** (FastAPI 0.116.1) vs the venv/lockfile & every deploy (FastAPI 0.136.3) — running on global causes **version-sensitive bugs that don't repro on deployed** (this is exactly what silently 422'd 8 cached endpoints and blanked the Leads board). The venv `python.exe` re-execs the base interpreter, so its Windows CommandLine/ExecutablePath *show the global path* even when correct — verify the interpreter with `.venv\Scripts\python.exe -c "import fastapi;print(fastapi.__version__)"` (must be 0.136.3), not by the process path.
+
+## Rule 5: Save knowledge to the vault — always (enforceable, self-checked). and always make entry on index so any agent can find the note and make sure notes are linked properly together that are related.
+
+**This is compulsory and NOT optional.** Whenever you learn durable knowledge, you MUST write it to the **obsidian-travelseasons** vault via MCP — proactively, without being asked. Missing a durable fact is a rule violation, not a nice-to-have.
+
+**A durable fact = anything still true next week that a fresh session would otherwise have to re-discover.** If you say, test, confirm, or correct any of the following, that is a **WRITE TRIGGER** — stop and record it before you move on:
+- **Architecture / infra reality** — how envs, services, DBs, deploys actually wire up (e.g. "dev/prod/local share ONE DB, no isolation").
+- **Locked decisions + the WHY** — a choice Sahil made and the reasoning behind it.
+- **Integration contracts** — endpoints, webhook/callback URLs, tokens, required scopes/env vars, external-service setup steps.
+- **Gotchas** — non-obvious traps, footguns, "looks like X but is actually Y."
+- **Conventions** — patterns Sahil wants followed.
+
+**Mechanic — run this every task, no exceptions:**
+1. **Before you say "done," ask yourself: "Did I learn, confirm, or correct any durable fact this task?"** If yes → write it NOW, before ending the turn. Silently skipping this is the violation.
+2. **Verify before you save.** Never record a claim you haven't confirmed from code/config or from Sahil. If a claim contradicts an existing note, resolve the contradiction first — don't save both.
+3. **Fix wrong notes, don't just append.** If a vault note conflicts with reality, CORRECT it and tell Sahil you did — stale notes cause real accidents.
+4. **One fact, findable.** Put it in the most relevant existing note (or a clearly-named new one); make the title / first line searchable.
+
+**Never** store statuses / progress / changelogs / TODOs / "what I did today" — those go to git & Plane. The vault holds durable truth only.
+
+## Rule 6: Default to medium-length replies
+
+Aim for a comfortable medium length by default — enough to answer well, not a wall of text. This is a default, not a hard cap: go longer only when the task genuinely needs it (a real plan, a tricky tradeoff, code that needs explaining), and go shorter when a sentence or two will do. When in doubt, trim recaps, hedging, and options I won't pursue rather than padding to fill space.
+
+## Rule 7: UI is a first-class priority — build it fluid and proper
+
+Treat UI quality as a real deliverable, not an afterthought. Every screen should feel fluid and polished: smooth loading states (no blank/half-rendered flashes), sensible transitions, responsive layout, correct spacing/alignment, and interactions that respond instantly. Do it properly — match the existing design language and conventions (loading spinners, pages over modals, in-app dialogs/toasts, Verdana typography), don't ship rough or "good enough" markup. If a UI needs more care than a quick change allows, say so rather than cutting corners.
+
+Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+
+**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+
+## 1. Think Before Coding
+
+**Don't assume. Don't hide confusion. Surface tradeoffs.**
+
+Before implementing:
+- State your assumptions explicitly. If uncertain, ask.
+- If multiple interpretations exist, present them - don't pick silently.
+- If a simpler approach exists, say so. Push back when warranted.
+- If something is unclear, stop. Name what's confusing. Ask.
+
+## 2. Simplicity First
+
+**Minimum code that solves the problem. Nothing speculative.**
+
+- No features beyond what was asked.
+- No abstractions for single-use code.
+- No "flexibility" or "configurability" that wasn't requested.
+- No error handling for impossible scenarios.
+- If you write 200 lines and it could be 50, rewrite it.
+
+Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 3. Surgical Changes
+
+**Touch only what you must. Clean up only your own mess.**
+
+When editing existing code:
+- Don't "improve" adjacent code, comments, or formatting.
+- Don't refactor things that aren't broken.
+- Match existing style, even if you'd do it differently.
+- If you notice unrelated dead code, mention it - don't delete it.
+
+When your changes create orphans:
+- Remove imports/variables/functions that YOUR changes made unused.
+- Don't remove pre-existing dead code unless asked.
+
+The test: Every changed line should trace directly to the user's request.
+
+## 4. Goal-Driven Execution
+
+**Define success criteria. Loop until verified.**
+
+Transform tasks into verifiable goals:
+- "Add validation" → "Write tests for invalid inputs, then make them pass"
+- "Fix the bug" → "Write a test that reproduces it, then make it pass"
+- "Refactor X" → "Ensure tests pass before and after"
+
+For multi-step tasks, state a brief plan:
+```
+1. [Step] → verify: [check]
+2. [Step] → verify: [check]
+3. [Step] → verify: [check]
 ```
 
-- Lint/typecheck: no ruff/mypy configured; at minimum run
-  `python -m py_compile app/main.py app/worker.py app/auth.py app/config.py app/models.py app/storage.py`
-  before pushing. Keep imports sorted stdlib → third-party → local.
-- Tests: none exist yet. New tests go in `apps/backend/tests/test_<area>.py`
-  (pytest style, plain `def test_*`, no classes). Run one with
-  `pytest apps/backend/tests/test_auth.py::test_anonymous -q`.
-  Until tests exist, prove backend changes with a live smoke script against
-  dev (`:8000/health`, auth → submit → analyze → feed) and paste results.
-- Dev server logs to a file; kill stale servers by port-owner PID before
-  restarting or the old code keeps serving.
+Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
-## CRM (`apps/crm`)
+---
 
-```bash
-npm install                  # real install, never junctioned node_modules
-npm run dev -- --port 3000   # use localhost, NOT 127.0.0.1 (chunk 403s)
-npm run build                # must pass before push
-npm run lint                 # next lint
-npx tsc --noEmit             # strict TS (strict:true); fix all errors
-```
-
-- Path alias `@/*` maps to `apps/crm/*`. Shared fetch lives in `lib/api.ts`
-  (`apiFetch`, `getToken`); shared shapes in `lib/types.ts` — extend them,
-  don't inline response types in pages.
-- Server components by default; `"use client"` only for interactivity
-  (TanStack Query, leaflet, forms). Query keys: `["admin-incidents"]`,
-  `["admin-incident", id]`, `["admin-users"]`; invalidate on mutation success.
-- Leaflet maps must be dynamically imported with `ssr:false`
-  (see `components/map.tsx`). Never import `leaflet` CSS outside `layout.tsx`.
-- `<img>` tags need `// eslint-disable-next-line @next/next/no-img-element`.
-- Favicons/icons go in `app/` (`icon.svg`); never leave console 404s.
-
-## Mobile (`apps/mobile`)
-
-```bash
-flutter pub get
-flutter analyze              # must be clean
-flutter test                 # all tests
-flutter test test/api_client_test.dart   # single file
-```
-
-- Dio client in `lib/api_client.dart` mirrors backend routes 1:1; no Supabase
-  imports anywhere in the app. Secure storage holds the JWT only.
-
-## Supabase / migrations
-
-- Runtime uses the pooler session-mode URL (port 5432); migrations use the
-  direct URL. Both in `apps/backend/.env`. URL-encode the DB password.
-- New schema change = new file `supabase/migrations/00N_desc.sql` with
-  `IF NOT EXISTS` guards (safe re-runs). Repo is dashboard-linked and
-  auto-applies on push; local fallback: `python scripts/apply_migrations.py`.
-- Seed is idempotent (`ON CONFLICT DO NOTHING`).
-
-## Python style
-
-- Type everything: `Mapped[...]`, `str | None`, return annotations on routes.
-- All outgoing UUIDs coerced with `str()` (live Postgres returns UUID objects;
-  JWT/query params need strings). Central rule: `create_token(str(sub))`.
-- Pydantic `*In` models for every write body (`IncidentCreate` style not used;
-  multipart for uploads). Validate enums (status/severity/category) explicitly.
-- Errors: `HTTPException(404/401/403)` with short details, never stack traces
-  to clients. Background work is best-effort: never let Redis/Gemini/FCM
-  failures 500 a user request — degrade to stub/skip and log.
-- Time: UTC ISO strings out (`...isoformat()`), `datetime.utcnow` in models.
-- Naming: `admin_*` for staff routes, `fake_*` for stubs, `enqueue_*` for
-  fire-and-forget queue calls. Env via `app/config.py` (`settings.X`) only.
-
-## TypeScript/style
-
-- `strict:true`. No `any` in new code; unknown JSON narrowed with guards.
-- Components: `SectionTitle` pattern for card headings; `Badge` for every
-  status/severity value (extend its color map, never raw colored spans).
-- Buttons: disable while `mutation.isPending`; disable no-op actions
-  (current status, unchanged select). No emojis in UI; inline SVG icons only.
-- Leaflet: custom controls as components inside `MapContainer`
-  (see `leaflet-controls.tsx`: `ZoomHandlers`, `FsButton`). Zoom caps are
-  mandatory on every map: `maxZoom={18}` + `maxNativeZoom={17}` (past Esri
-  coverage serves "Map Data Not Available" tiles). Remount maps by `key`
-  when async data defines the view (center/fitBounds freeze at mount).
-- Colors: sidebar `#14231a`, active `#2a4a33`, content bg `#faf7f0`,
-  accent rust `#c2410c`. Cream/white cards, `rounded-xl`, zinc text scale.
-
-## Git, secrets, architecture rules
-
-- `.env` files never committed (gitignored at every depth). No keys, tokens,
-  or passwords in code, docs, screenshots, or vault notes — ever.
-- Commits: short imperative subject (`Add/Fix/Feat/Chore scope: ...`),
-  one logical change each. Never commit `node_modules/`, `.next/`,
-  `__pycache__/`, `*.log`, `.playwright-mcp/`, screenshots, or `wt-*/`.
-- Data flows App → Backend → Supabase only. No direct app/CRM-to-Supabase
-  traffic; no direct DB writes for data (APIs only; raw SQL for migrations).
-- No Supabase Auth/Functions/Realtime/RLS. Custom JWT stays.
-
-## Verifying CRM changes (mandatory)
-
-Drive the real browser via Playwright MCP per change: navigate (localhost) →
-snapshot (act on refs, never guessed CSS) → screenshot + Read the PNG →
-console + network check. Measure with `evaluate`, don't eyeball.
-Log in fresh each run (`admin@example.com` / `admin123`).
-Gesture code needs trusted input (real keyboard+mouse), never synthetic
-dispatch alone. Delete `.playwright-mcp/` output and stray screenshots after.
+**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.

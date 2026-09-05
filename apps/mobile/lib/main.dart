@@ -4,8 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'auth_provider.dart';
 import 'screens/feed_screen.dart';
 import 'screens/report_screen.dart';
-import 'screens/settings_screen.dart';
-import 'screens/verify_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -63,8 +61,6 @@ class _HomeShellState extends State<HomeShell> {
   static const _pages = [
     FeedScreen(),
     ReportScreen(),
-    VerifyScreen(),
-    SettingsScreen(),
   ];
 
   @override
@@ -76,24 +72,14 @@ class _HomeShellState extends State<HomeShell> {
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.map_outlined),
-            selectedIcon: Icon(Icons.map),
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
             label: 'Feed',
           ),
           NavigationDestination(
             icon: Icon(Icons.add_a_photo_outlined),
             selectedIcon: Icon(Icons.add_a_photo),
             label: 'Report',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.verified_outlined),
-            selectedIcon: Icon(Icons.verified),
-            label: 'Verify',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
-            label: 'Settings',
           ),
         ],
       ),

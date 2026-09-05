@@ -347,6 +347,27 @@ def get_incident(incident_id: str, db: Session = Depends(get_db)):
     return incident_out(i)
 
 
+@app.get("/incidents/{incident_id}/photo")
+def public_photo(incident_id: str, db: Session = Depends(get_db)):
+    """Public reels-feed photo. Verified incidents only, no auth."""
+    from fastapi.responses import FileResponse, RedirectResponse
+
+    i = db.get(Incident, incident_id)
+    if i is None or not i.photo_url or i.status != "verified":
+        raise HTTPException(404, "no photo")
+    key = i.photo_url.replace("\\", "/").strip()
+    if key.startswith(f"{settings.STORAGE_BUCKET}/"):
+        if not settings.SUPABASE_SERVICE_KEY:
+            raise HTTPException(404, "photo unavailable")
+        url = get_storage().signed_url(key.split("/", 1)[1])
+        return RedirectResponse(url, status_code=302)
+    p = key[2:] if key.startswith("./") else key.lstrip("/")
+    if not os.path.exists(p):
+        raise HTTPException(404, "photo file missing")
+    media = "image/png" if p.lower().endswith(".png") else "image/jpeg"
+    return FileResponse(p, media_type=media)
+
+
 # ---------- admin ----------
 @app.post("/admin/login")
 def admin_login(body: AdminLoginIn, db: Session = Depends(get_db)):

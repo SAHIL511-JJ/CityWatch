@@ -1,9 +1,14 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../api_client.dart';
+
+const _maxPhotoBytes = 8 * 1024 * 1024;
+const _allowedExts = ['jpg', 'jpeg', 'png'];
 
 class ReportScreen extends ConsumerStatefulWidget {
   const ReportScreen({super.key});
@@ -20,6 +25,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
   final _picker = ImagePicker();
 
   XFile? _photo;
+  String? _photoError;
   double? _lat;
   double? _lng;
   bool _locating = false;
@@ -40,7 +46,24 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
       maxWidth: 2048,
       imageQuality: 85,
     );
-    if (file != null) setState(() => _photo = file);
+    if (file == null) return;
+    final err = await _checkPhoto(file);
+    setState(() {
+      _photo = err == null ? file : null;
+      _photoError = err;
+    });
+  }
+
+  Future<String?> _checkPhoto(XFile file) async {
+    final ext = file.path.split('.').last.toLowerCase();
+    if (!_allowedExts.contains(ext)) {
+      return 'Only jpg/png photos allowed.';
+    }
+    final bytes = await file.length();
+    if (bytes > _maxPhotoBytes) {
+      return 'Photo too big — pick one under 8MB.';
+    }
+    return null;
   }
 
   Future<void> _useGps() async {
@@ -72,6 +95,13 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    if (_photo == null) {
+      setState(() => _photoError ??= 'Photo needed — add one to submit.');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Photo needed — add one to submit.')),
+      );
+      return;
+    }
     if (_lat == null || _lng == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Tap "Use GPS" first.')),
@@ -94,10 +124,12 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
           );
       setState(() {
         _result =
-            'Submitted: ${json['id'] ?? '?'} (status: ${json['status'] ?? 'processing'})';
+            'Sent! AI checking... ${json['id'] ?? ''} (status: ${json['status'] ?? 'processing'})';
       });
       _title.clear();
       _description.clear();
+      _address.clear();
+      setState(() => _photo = null);
     } catch (e) {
       setState(() => _result = 'Submit failed: $e');
     } finally {
@@ -107,6 +139,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final canSubmit = !_submitting && _photo != null && _lat != null;
     return Scaffold(
       appBar: AppBar(title: const Text('Report incident')),
       body: SingleChildScrollView(
@@ -119,7 +152,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
               TextFormField(
                 controller: _title,
                 decoration: const InputDecoration(
-                  labelText: 'Title',
+                  labelText: 'Title *',
                   border: OutlineInputBorder(),
                 ),
                 validator: (v) =>
@@ -130,7 +163,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
                 controller: _description,
                 maxLines: 4,
                 decoration: const InputDecoration(
-                  labelText: 'Description',
+                  labelText: 'Description *',
                   border: OutlineInputBorder(),
                 ),
                 validator: (v) =>
@@ -145,6 +178,8 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
                 ),
               ),
               const SizedBox(height: 12),
+              const Text('Photo * — no photo = no submit'),
+              const SizedBox(height: 8),
               Row(
                 children: [
                   Expanded(
@@ -167,9 +202,37 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
               if (_photo != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.file(
+                          File(_photo!.path),
+                          height: 180,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      Row(
+                        children: [
+                          Expanded(child: Text('Photo: ${_photo!.name}')),
+                          TextButton(
+                            onPressed: () => setState(() => _photo = null),
+                            child: const Text('Remove'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              if (_photoError != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
                   child: Text(
-                    'Photo: ${_photo!.name}',
-                    style: Theme.of(context).textTheme.bodySmall,
+                    _photoError!,
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.error),
                   ),
                 ),
               const SizedBox(height: 12),
@@ -184,16 +247,24 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
                     : const Icon(Icons.my_location),
                 label: Text(
                   _lat == null
-                      ? 'Use GPS'
+                      ? 'Use GPS *'
                       : 'GPS: ${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}',
                 ),
               ),
               const SizedBox(height: 16),
               FilledButton.icon(
-                onPressed: _submitting ? null : _submit,
+                onPressed: canSubmit ? _submit : null,
                 icon: const Icon(Icons.send_outlined),
                 label: Text(_submitting ? 'Submitting…' : 'Submit report'),
               ),
+              if (!canSubmit && !_submitting)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text(
+                    'Add a photo and GPS to enable submit.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ),
               if (_result != null)
                 Padding(
                   padding: const EdgeInsets.only(top: 12),

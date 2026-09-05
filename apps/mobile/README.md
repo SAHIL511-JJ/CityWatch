@@ -22,12 +22,11 @@ flutter run --dart-define=API_URL=http://10.0.2.2:8000
 - `POST /incidents` multipart(title, description, lat, lng, address?, photo)
 - `GET /incidents?lat&lng&radius_km&severity&category` (verified only)
 
-## Layout
+## Layout (2 tabs this round — Feed + Report)
 
-- `lib/config.dart` — baseUrl (`--dart-define=API_URL=…`)
-- `lib/api_client.dart` — dio + JWT interceptor, feed + submit
-- `lib/auth_provider.dart` — anonymous device_id (secure_storage + uuid), send/verify, JWT store
-- `lib/screens/feed_screen.dart` — flutter_map + list toggle
-- `lib/screens/report_screen.dart` — title/description/photo/GPS submit
-- `lib/screens/verify_screen.dart` — phone/email + code
-- `lib/screens/settings_screen.dart` — radius, min severity, FCM stub
+- `lib/config.dart` — baseUrl (`--dart-define=API_URL=…`, emulator `http://10.0.2.2:8000`)
+- `lib/api_client.dart` — dio + JWT interceptor, feed + submit + `photoUrlFor(id)` -> `GET /incidents/{id}/photo` (public, verified only)
+- `lib/auth_provider.dart` — anonymous device_id auto-login behind the scenes
+- `lib/screens/feed_screen.dart` — reels: vertical PageView, 1 post per screen, photo + severity + time/distance + Open in Google Maps
+- `lib/screens/report_screen.dart` — title*/description*/photo*/GPS*, jpg/png <=8MB, no photo/GPS = no submit
+- Verify/Settings screens exist but are hidden until profile round. Push/FCM stays OFF.

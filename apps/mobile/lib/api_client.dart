@@ -147,6 +147,7 @@ class ApiClient {
     double radiusKm = 10,
     String? severity,
     String? category,
+    int limit = 50,
   }) async {
     final res = await _dio.get<List<dynamic>>(
       '/incidents',
@@ -154,6 +155,7 @@ class ApiClient {
         'lat': lat,
         'lng': lng,
         'radius_km': radiusKm,
+        'limit': limit,
         if (severity != null && severity.isNotEmpty) 'severity': severity,
         if (category != null && category.isNotEmpty) 'category': category,
       },
@@ -171,6 +173,39 @@ class ApiClient {
     final res = await _dio.get<Map<String, dynamic>>('/incidents/$id');
     return res.data ?? <String, dynamic>{};
   }
+
+  /// Public photo URL for reels cards. Backend serves verified only, else 404.
+  String photoUrlFor(String id) {
+    return '${AppConfig.baseUrl}/incidents/$id/photo';
+  }
+
+  /// Raw photo bytes, null when missing. Results cached per session.
+  /// Backend serves a ~70-byte 1px placeholder when no real photo exists —
+  /// callers must treat tiny responses as "no photo" (see [hasRealPhoto]).
+  final Map<String, List<int>?> _photoCache = {};
+
+  Future<List<int>?> fetchPhotoBytes(String id) async {
+    if (_photoCache.containsKey(id)) return _photoCache[id];
+    try {
+      final res = await _dio.get<List<int>>(
+        '/incidents/$id/photo',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      final bytes = res.data;
+      _photoCache[id] = bytes;
+      return bytes;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        _photoCache[id] = null;
+        return null;
+      }
+      rethrow;
+    }
+  }
+
+  /// True only for a real photo. Anything under 1KB is the 1px placeholder.
+  static bool hasRealPhoto(List<int>? bytes) =>
+      bytes != null && bytes.length > 1024;
 
   /// Stub: upload FCM token so backend can push nearby alerts.
   /// Wire to real endpoint (e.g. PATCH /users/me) once backend exposes it.

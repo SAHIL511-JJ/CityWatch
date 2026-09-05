@@ -71,10 +71,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             },
           ),
           const Divider(height: 32),
-          ListTile(
+          const ListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('Backend'),
-            subtitle: const Text(AppConfig.baseUrl),
+            title: Text('Backend'),
+            subtitle: Text(AppConfig.baseUrl),
           ),
           ListTile(
             contentPadding: EdgeInsets.zero,
