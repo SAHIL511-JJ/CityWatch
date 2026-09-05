@@ -1,10 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "next/navigation";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, buildQuery, getApiBase, getToken } from "@/lib/api";
-import type { Incident, Severity } from "@/lib/types";
+import type { DuplicatePair, Incident, Severity, StaffMember } from "@/lib/types";
+import { staffName } from "@/lib/types";
+import { slaFor, slaLabel } from "@/lib/sla";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -22,7 +25,7 @@ const SEV_BAR: Record<Severity, string> = {
   low: "bg-zinc-300",
 };
 
-type SortKey = "newest" | "oldest" | "severity";
+type SortKey = "newest" | "oldest" | "severity" | "action";
 
 function timeAgo(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -93,39 +96,162 @@ function SkeletonRows() {
 }
 
 export default function IncidentsPage() {
+  return (
+    <Suspense fallback={<p>Loading incidents…</p>}>
+      <IncidentsInner />
+    </Suspense>
+  );
+}
+
+function IncidentsInner() {
+  const qc = useQueryClient();
+  const searchParams = useSearchParams();
   const [status, setStatus] = useState("");
   const [severity, setSeverity] = useState("");
   const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<SortKey>("newest");
+  const [sort, setSort] = useState<SortKey>(
+    searchParams.get("sort") === "action" ? "action" : "newest"
+  );
+  const [mineOnly, setMineOnly] = useState(false);
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [bulkAssignee, setBulkAssignee] = useState("");
+  const [toast, setToast] = useState<{ msg: string; undo: () => void } | null>(null);
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["admin-incidents", status, severity],
     queryFn: () =>
       apiFetch<Incident[]>(`/admin/incidents${buildQuery({ status, severity })}`),
   });
+  const me = useQuery({
+    queryKey: ["admin-me"],
+    queryFn: () => apiFetch<{ id: string; email: string; role: string }>("/admin/me"),
+    retry: false,
+  });
+  const staff = useQuery({
+    queryKey: ["admin-staff"],
+    queryFn: () => apiFetch<StaffMember[]>("/admin/staff"),
+    retry: false,
+  });
+  const dupes = useQuery({
+    queryKey: ["admin-duplicates"],
+    queryFn: () => apiFetch<DuplicatePair[]>("/admin/incidents/duplicates"),
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 6000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const staffById = useMemo(() => {
+    const m = new Map<string, StaffMember>();
+    (staff.data ?? []).forEach((s) => m.set(s.id, s));
+    return m;
+  }, [staff.data]);
+
+  const ownerName = (id: string | null | undefined) => {
+    if (!id) return null;
+    const s = staffById.get(id);
+    return staffName(s?.email, id);
+  };
+
+  const dupCount = useMemo(() => {
+    const m = new Map<string, DuplicatePair[]>();
+    (dupes.data ?? []).forEach((p) => {
+      for (const id of [p.a_id, p.b_id]) {
+        const list = m.get(id) ?? [];
+        list.push(p);
+        m.set(id, list);
+      }
+    });
+    return m;
+  }, [dupes.data]);
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const filtered = (data ?? []).filter(
-      (i) =>
+    const filtered = (data ?? []).filter((i) => {
+      if (mineOnly && me.data && i.assigned_to !== me.data.id) return false;
+      return (
         !q ||
         i.title.toLowerCase().includes(q) ||
         (i.description ?? "").toLowerCase().includes(q)
-    );
+      );
+    });
     return [...filtered].sort((a, b) => {
       if (sort === "oldest")
         return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
       if (sort === "severity") return SEV_RANK[a.severity] - SEV_RANK[b.severity];
+      if (sort === "action") {
+        const sa = slaFor(a.created_at, a.severity, a.status);
+        const sb = slaFor(b.created_at, b.severity, b.status);
+        const rank = (s: typeof sa) => (!s ? 3 : s.state === "overdue" ? 0 : s.state === "breaching" ? 1 : 2);
+        const d = rank(sa) - rank(sb);
+        if (d !== 0) return d;
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      }
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
-  }, [data, query, sort]);
+  }, [data, query, sort, mineOnly, me.data]);
 
-  const hasFilters = !!status || !!severity || !!query;
+  const selectedIds = useMemo(
+    () => rows.filter((r) => selected[r.id]).map((r) => r.id),
+    [rows, selected]
+  );
+  const allChecked = rows.length > 0 && rows.every((r) => selected[r.id]);
+
+  const refreshAll = () => {
+    qc.invalidateQueries({ queryKey: ["admin-incidents"] });
+    qc.invalidateQueries({ queryKey: ["admin-duplicates"] });
+    qc.invalidateQueries({ queryKey: ["admin-staff"] });
+  };
+
+  const bulk = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      apiFetch<{ updated: number }>(`/admin/incidents/bulk`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: refreshAll,
+  });
+
+  const patchOne = (id: string, body: Record<string, unknown>) =>
+    apiFetch(`/admin/incidents/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+
+  /** Restore a snapshot of rows (for bulk undo). Sequential, best-effort. */
+  const restoreSnapshot = async (snap: Incident[]) => {
+    for (const s of snap) {
+      try {
+        await patchOne(s.id, { status: s.status, severity: s.severity });
+        await patchOne(s.id, { assigned_to: s.assigned_to ?? null });
+      } catch {
+        /* keep going */
+      }
+    }
+    refreshAll();
+  };
+
+  const runBulk = (body: Record<string, unknown>, label: string) => {
+    const snap = rows.filter((r) => selected[r.id]);
+    bulk.mutate(
+      { ids: selectedIds, ...body },
+      {
+        onSuccess: () => {
+          setSelected({});
+          setBulkAssignee("");
+          setToast({ msg: label, undo: () => restoreSnapshot(snap) });
+        },
+      }
+    );
+  };
+
+  const hasFilters = !!status || !!severity || !!query || mineOnly;
 
   const clearAll = () => {
     setStatus("");
     setSeverity("");
     setQuery("");
+    setMineOnly(false);
   };
 
   const selectCls =
@@ -197,8 +323,18 @@ export default function IncidentsPage() {
               <option value="newest">Newest first</option>
               <option value="oldest">Oldest first</option>
               <option value="severity">Highest severity</option>
+              <option value="action">Needs action</option>
             </select>
           </div>
+          <label className="flex cursor-pointer items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm">
+            <input
+              type="checkbox"
+              checked={mineOnly}
+              onChange={(e) => setMineOnly(e.target.checked)}
+              className="accent-[#2a4a33]"
+            />
+            My queue{me.data ? ` (${(data ?? []).filter((r) => r.assigned_to === me.data.id).length})` : ""}
+          </label>
           {hasFilters && (
             <button
               onClick={clearAll}
@@ -215,13 +351,77 @@ export default function IncidentsPage() {
             <>
               <strong className="text-zinc-800">{rows.length}</strong>{" "}
               {rows.length === 1 ? "incident" : "incidents"}
+              {(dupes.data ?? []).length > 0 && (
+                <span className="ml-2 rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800">
+                  {(dupes.data ?? []).length} suspected duplicate pairs
+                </span>
+              )}
               {isFetching && !isLoading && " · refreshing…"}
             </>
           )}
         </p>
       </Card>
 
+      {/* Bulk action bar */}
+      {selectedIds.length > 0 && (
+        <Card className="flex flex-wrap items-center gap-2 border-[#2a4a33] bg-[#f2f6f0]">
+          <strong className="text-sm">{selectedIds.length} selected</strong>
+          {(
+            [
+              ["verified", "Approve"],
+              ["rejected", "Reject"],
+              ["escalated", "Escalate"],
+              ["resolved", "Resolve"],
+            ] as const
+          ).map(([s, label]) => (
+            <button
+              key={s}
+              disabled={bulk.isPending}
+              onClick={() => runBulk({ status: s }, `${selectedIds.length} set to ${s}`)}
+              className="inline-flex items-center justify-center rounded-md bg-[#14231a] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#2a4a33] disabled:opacity-50"
+            >
+              {label}
+            </button>
+          ))}
+          <select
+            aria-label="Bulk assign to staff"
+            className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-[#2a4a33]"
+            value={bulkAssignee}
+            onChange={(e) => setBulkAssignee(e.target.value)}
+          >
+            <option value="">Assign to…</option>
+            {(staff.data ?? []).map((s) => (
+              <option key={s.id} value={s.id}>
+                {staffName(s.email, s.id)} ({s.role})
+              </option>
+            ))}
+          </select>
+          <button
+            disabled={!bulkAssignee || bulk.isPending}
+            onClick={() => runBulk({ assigned_to: bulkAssignee }, `${selectedIds.length} assigned`)}
+            className="inline-flex items-center justify-center rounded-md bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-100 disabled:opacity-50"
+          >
+            Assign
+          </button>
+          <button
+            onClick={() => setSelected({})}
+            className="ml-auto text-sm text-zinc-500 hover:text-zinc-800"
+          >
+            Clear selection
+          </button>
+        </Card>
+      )}
+
       {isLoading && <SkeletonRows />}
+
+      {error && !isLoading && (
+        <Card className="border-red-200 bg-red-50 text-center">
+          <p className="text-sm text-red-700">Couldn't load incidents: {(error as Error).message}</p>
+          <Button onClick={() => refetch()} className="mt-3">
+            Retry
+          </Button>
+        </Card>
+      )}
 
       {!isLoading && !error && rows.length === 0 && (
         <Card className="py-10 text-center">
@@ -242,9 +442,27 @@ export default function IncidentsPage() {
       )}
 
       <div className="grid gap-3">
+        {rows.length > 0 && (
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-500">
+            <input
+              type="checkbox"
+              checked={allChecked}
+              onChange={(e) => {
+                const next: Record<string, boolean> = {};
+                if (e.target.checked) rows.forEach((r) => (next[r.id] = true));
+                setSelected(next);
+              }}
+              className="accent-[#2a4a33]"
+            />
+            Select all {rows.length} shown
+          </label>
+        )}
         {rows.map((inc) => {
           const src = thumbSrc(inc);
           const loc = inc.address ?? `${inc.lat.toFixed(3)}, ${inc.lng.toFixed(3)}`;
+          const sla = slaFor(inc.created_at, inc.severity, inc.status);
+          const owner = ownerName(inc.assigned_to);
+          const dups = dupCount.get(inc.id) ?? [];
           return (
             <Card key={inc.id} className="relative overflow-hidden">
               <span
@@ -252,6 +470,15 @@ export default function IncidentsPage() {
                 className={`absolute inset-y-0 left-0 w-1.5 ${SEV_BAR[inc.severity]}`}
               />
               <div className="flex items-center gap-4 pl-2">
+                <input
+                  type="checkbox"
+                  aria-label={`Select ${inc.title}`}
+                  checked={!!selected[inc.id]}
+                  onChange={(e) =>
+                    setSelected((m) => ({ ...m, [inc.id]: e.target.checked }))
+                  }
+                  className="h-4 w-4 shrink-0 accent-[#2a4a33]"
+                />
                 <Thumb src={src} />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -266,9 +493,36 @@ export default function IncidentsPage() {
                     {loc}
                     {inc.description ? ` · ${inc.description}` : ""}
                   </p>
-                  <div className="mt-1.5 flex flex-wrap gap-1.5 capitalize">
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5 capitalize">
                     <Badge value={inc.status} />
                     <Badge value={inc.severity} />
+                    {sla && sla.state !== "ok" && (
+                      <span
+                        title={slaLabel(sla)}
+                        className={`rounded-full px-2 py-0.5 text-xs font-bold normal-case ${
+                          sla.state === "overdue"
+                            ? "bg-red-600 text-white"
+                            : "bg-amber-100 text-amber-800"
+                        }`}
+                      >
+                        {sla.state === "overdue" ? "Overdue" : "Breaching"}
+                      </span>
+                    )}
+                    {dups.length > 0 && (
+                      <Link
+                        href={`/incidents/${inc.id}#duplicates`}
+                        title={dups
+                          .map((d) => `Score ${d.score} · ${d.distance_m}m · ${d.hours_apart}h apart`)
+                          .join("\n")}
+                        className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-bold normal-case text-purple-800 hover:bg-purple-200"
+                      >
+                        {dups.length} possible duplicate{dups.length > 1 ? "s" : ""}
+                      </Link>
+                    )}
+                    <span className="inline-flex items-center gap-1 text-xs normal-case text-zinc-500" title={owner ? `Assigned to ${owner}` : "Unassigned"}>
+                      <span aria-hidden className={`inline-block h-1.5 w-1.5 rounded-full ${owner ? "bg-green-500" : "bg-zinc-300"}`} />
+                      {owner ?? "Unassigned"}
+                    </span>
                   </div>
                 </div>
                 <span
@@ -282,6 +536,26 @@ export default function IncidentsPage() {
           );
         })}
       </div>
+
+      {/* Toast */}
+      {toast && (
+        <div
+          role="status"
+          className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-zinc-900 px-4 py-2.5 text-sm text-white shadow-lg"
+        >
+          {bulk.isPending ? "Applying…" : toast.msg}
+          <button
+            onClick={() => {
+              const t = toast;
+              setToast(null);
+              t.undo();
+            }}
+            className="rounded px-2 py-0.5 font-medium text-amber-300 hover:bg-white/10"
+          >
+            Undo
+          </button>
+        </div>
+      )}
     </div>
   );
 }

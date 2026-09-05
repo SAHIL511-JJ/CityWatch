@@ -80,6 +80,16 @@ class NoteIn(BaseModel):
 
 
 # ---------- helpers ----------
+def _is_uuid(v: str | None) -> bool:
+    if not v:
+        return False
+    try:
+        __import__("uuid").UUID(v)
+        return True
+    except (ValueError, AttributeError):
+        return False
+
+
 def haversine_km(lat1, lng1, lat2, lng2) -> float:
     r = 6371.0
     p1, p2 = math.radians(lat1), math.radians(lat2)
@@ -377,7 +387,12 @@ def admin_patch(
         i.status = body.status
     if body.severity:
         i.severity = body.severity
-    if body.assigned_to:
+    # assigned_to uses field-set presence so explicit null unassigns.
+    if "assigned_to" in body.model_fields_set:
+        if body.assigned_to is not None and (
+            not _is_uuid(body.assigned_to) or db.get(Staff, body.assigned_to) is None
+        ):
+            raise HTTPException(422, "assignee is not staff")
         i.assigned_to = body.assigned_to
     db.add(
         StatusHistory(
@@ -407,6 +422,289 @@ def admin_note(
         "note": n.note,
         "created_at": n.created_at.isoformat() if n.created_at else None,
     }
+
+
+# ---------- staff directory (KAN-17) ----------
+@app.get("/admin/me")
+def admin_me(staff: Staff = Depends(get_current_staff)):
+    return {"id": str(staff.id), "email": staff.email, "role": staff.role}
+
+
+@app.get("/admin/staff")
+def admin_staff(
+    staff: Staff = Depends(get_current_staff), db: Session = Depends(get_db)
+):
+    rows = db.query(Staff).order_by(Staff.email.asc()).all()
+    out = []
+    for s in rows:
+        open_count = (
+            db.query(func.count())
+            .filter(
+                Incident.assigned_to == s.id,
+                Incident.status.notin_(["resolved", "closed"]),
+            )
+            .scalar()
+        )
+        out.append(
+            {
+                "id": str(s.id),
+                "email": s.email,
+                "role": s.role,
+                "open_count": int(open_count or 0),
+            }
+        )
+    return out
+
+
+# ---------- suspected duplicates + merge (KAN-15) ----------
+import re as _re
+
+
+def _norm_title(t: str | None) -> str:
+    t = (t or "").lower().strip()
+    t = _re.sub(r"[^a-z0-9\s]", "", t)
+    return _re.sub(r"\s+", " ", t)
+
+
+@app.get("/admin/incidents/duplicates")
+def admin_duplicates(
+    staff: Staff = Depends(get_current_staff), db: Session = Depends(get_db)
+):
+    """Pairs with same normalized title within 150m and 24h, scored 0-100.
+    Closed records (incl. already-merged) are never candidates."""
+    rows = (
+        db.query(Incident)
+        .filter(Incident.status != "closed")
+        .order_by(Incident.created_at.asc())
+        .limit(500)
+        .all()
+    )
+    pairs = []
+    for x in range(len(rows)):
+        for y in range(x + 1, len(rows)):
+            a, b = rows[x], rows[y]
+            if not a.title or _norm_title(a.title) != _norm_title(b.title):
+                continue
+            dist_m = haversine_km(a.lat, a.lng, b.lat, b.lng) * 1000
+            if dist_m > 150:
+                continue
+            try:
+                hours = abs((a.created_at - b.created_at).total_seconds()) / 3600
+            except Exception:
+                continue
+            if hours > 24:
+                continue
+            score = round(50 + 30 * (1 - dist_m / 150) + 20 * (1 - hours / 24))
+            pairs.append(
+                {
+                    "a_id": str(a.id),
+                    "b_id": str(b.id),
+                    "title": a.title,
+                    "distance_m": round(dist_m),
+                    "hours_apart": round(hours, 1),
+                    "score": score,
+                }
+            )
+    pairs.sort(key=lambda p: -p["score"])
+    return pairs
+
+
+class MergeIn(BaseModel):
+    master_id: str
+    duplicate_ids: list[str]
+
+
+@app.post("/admin/incidents/merge")
+def admin_merge(
+    body: MergeIn,
+    staff: Staff = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+):
+    """Fold duplicates into a master: notes + history move over, the
+    master's missing photo is backfilled, the duplicate is closed with a
+    pointer note. Nothing is deleted — split can reopen."""
+    master = db.get(Incident, body.master_id)
+    if master is None:
+        raise HTTPException(404, "master not found")
+    if not body.duplicate_ids:
+        raise HTTPException(422, "no duplicates given")
+    merged = []
+    moved_notes = 0
+    moved_hist = 0
+    for did in body.duplicate_ids:
+        if did == master.id:
+            raise HTTPException(422, "master cannot merge into itself")
+        d = db.get(Incident, did)
+        if d is None:
+            raise HTTPException(404, f"duplicate not found: {did}")
+        notes = db.query(IncidentNote).filter_by(incident_id=d.id).all()
+        hist = db.query(StatusHistory).filter_by(incident_id=d.id).all()
+        for n in notes:
+            n.incident_id = master.id
+        for h in hist:
+            h.incident_id = master.id
+        moved_notes += len(notes)
+        moved_hist += len(hist)
+        if not master.photo_url and d.photo_url:
+            master.photo_url = d.photo_url
+        db.add(
+            IncidentNote(
+                incident_id=master.id,
+                staff_id=staff.id,
+                note=f"Merged '{d.title}' ({d.id}) into this record — "
+                f"{len(notes)} notes, {len(hist)} history entries preserved.",
+            )
+        )
+        old = d.status
+        d.status = "closed"
+        db.add(
+            StatusHistory(
+                incident_id=d.id,
+                old_status=old,
+                new_status="closed",
+                changed_by=staff.id,
+            )
+        )
+        db.add(
+            IncidentNote(
+                incident_id=d.id,
+                staff_id=staff.id,
+                note=f"Merged into {master.id}. Split to reopen.",
+            )
+        )
+        merged.append(str(d.id))
+    db.commit()
+    return {
+        "master_id": str(master.id),
+        "merged": merged,
+        "moved_notes": moved_notes,
+        "moved_history": moved_hist,
+    }
+
+
+class SplitIn(BaseModel):
+    incident_id: str
+
+
+@app.post("/admin/incidents/split")
+def admin_split(
+    body: SplitIn,
+    staff: Staff = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+):
+    """Reopen a merged (closed) duplicate. Moved notes/history stay on the
+    master as the audit trail; the pointer notes on both sides record it."""
+    i = db.get(Incident, body.incident_id)
+    if i is None:
+        raise HTTPException(404, "not found")
+    if i.status != "closed":
+        raise HTTPException(422, "only closed records can be split apart")
+    prev = None
+    hist = (
+        db.query(StatusHistory)
+        .filter_by(incident_id=i.id)
+        .order_by(StatusHistory.changed_at.desc())
+        .all()
+    )
+    for h in hist:
+        if h.new_status == "closed" and h.old_status and h.old_status != "closed":
+            prev = h.old_status
+            break
+    i.status = prev or "processing"
+    db.add(
+        StatusHistory(
+            incident_id=i.id,
+            old_status="closed",
+            new_status=i.status,
+            changed_by=staff.id,
+        )
+    )
+    db.add(
+        IncidentNote(
+            incident_id=i.id,
+            staff_id=staff.id,
+            note="Split apart — reopened for independent triage.",
+        )
+    )
+    db.commit()
+    return {"id": str(i.id), "status": i.status}
+
+
+# ---------- bulk triage (KAN-16) ----------
+BULK_STATUS = {
+    "processing",
+    "needs_review",
+    "verified",
+    "rejected",
+    "escalated",
+    "resolved",
+    "closed",
+}
+BULK_SEVERITY = {"low", "medium", "high", "critical"}
+
+
+class BulkIn(BaseModel):
+    ids: list[str]
+    status: str | None = None
+    severity: str | None = None
+    assigned_to: str | None = None
+
+
+@app.post("/admin/incidents/bulk")
+def admin_bulk(
+    body: BulkIn,
+    staff: Staff = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+):
+    if not body.ids:
+        raise HTTPException(422, "no ids given")
+    if body.status is not None and body.status not in BULK_STATUS:
+        raise HTTPException(422, "bad status")
+    if body.severity is not None and body.severity not in BULK_SEVERITY:
+        raise HTTPException(422, "bad severity")
+    if body.assigned_to is not None and (
+        not _is_uuid(body.assigned_to) or db.get(Staff, body.assigned_to) is None
+    ):
+        raise HTTPException(422, "assignee is not staff")
+    if body.status is None and body.severity is None and body.assigned_to is None:
+        raise HTTPException(422, "nothing to apply")
+    results = []
+    unset_assign = "assigned_to" in body.model_fields_set and body.assigned_to is None
+    for iid in body.ids:
+        i = db.get(Incident, iid)
+        if i is None:
+            results.append({"id": iid, "ok": False, "error": "not found"})
+            continue
+        changed = []
+        if body.status is not None and body.status != i.status:
+            changed.append("status")
+        if body.severity is not None and body.severity != i.severity:
+            changed.append("severity")
+        if unset_assign and i.assigned_to is not None:
+            changed.append("assigned_to")
+        elif body.assigned_to is not None and body.assigned_to != i.assigned_to:
+            changed.append("assigned_to")
+        old = i.status
+        if body.status is not None:
+            i.status = body.status
+        if body.severity is not None:
+            i.severity = body.severity
+        if unset_assign:
+            i.assigned_to = None
+        elif body.assigned_to is not None:
+            i.assigned_to = body.assigned_to
+        if changed:
+            db.add(
+                StatusHistory(
+                    incident_id=i.id,
+                    old_status=old,
+                    new_status=i.status,
+                    changed_by=staff.id,
+                )
+            )
+        results.append({"id": str(i.id), "ok": True, "changed": changed})
+    db.commit()
+    return {"updated": sum(1 for r in results if r["ok"]), "results": results}
 
 
 @app.get("/admin/users")

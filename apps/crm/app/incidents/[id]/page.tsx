@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, getApiBase, getToken } from "@/lib/api";
-import type { AppUser, IncidentDetail, Severity, StatusHistoryEntry } from "@/lib/types";
+import type { DuplicatePair, IncidentDetail, Severity, StaffMember, StatusHistoryEntry } from "@/lib/types";
+import { staffName } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -62,9 +63,114 @@ function initialsOf(id: string | null | undefined): string {
   return (s.slice(0, 2) || "SY").toUpperCase();
 }
 
+/** Avatar initials from a display name, falling back to the id. */
+function avatarOf(name: string | null, id: string | null | undefined): string {
+  const clean = (name ?? "").replace(/[^a-zA-Z0-9]/g, "");
+  if (clean.length >= 2) return clean.slice(0, 2).toUpperCase();
+  return initialsOf(id);
+}
+
 type CollapsedGroup = { key: string; entries: StatusHistoryEntry[]; count: number };
 
+function CompareRow({
+  pair,
+  otherId,
+  merging,
+  onMerge,
+}: {
+  pair: DuplicatePair;
+  otherId: string;
+  merging: boolean;
+  onMerge: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const other = useQuery({
+    queryKey: ["admin-incident", otherId],
+    queryFn: () => apiFetch<IncidentDetail>(`/admin/incidents/${otherId}`),
+    enabled: open,
+    retry: false,
+  });
+  return (
+    <li className="rounded-lg border border-purple-200 bg-purple-50/50 p-3">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="rounded-full bg-purple-600 px-2 py-0.5 text-xs font-bold text-white" title="Match score">
+          {pair.score}
+        </span>
+        <span className="text-zinc-600">
+          {pair.distance_m}m apart · {pair.hours_apart}h apart
+        </span>
+        <span className="ml-auto flex gap-2">
+          <button
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            className="rounded-md bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-100"
+          >
+            {open ? "Hide compare" : "Compare"}
+          </button>
+          {!confirming ? (
+            <button
+              onClick={() => setConfirming(true)}
+              title="Fold the other record into this one — notes and history move over, nothing is deleted"
+              className="rounded-md bg-[#14231a] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#2a4a33]"
+            >
+              Merge into this
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={() => {
+                  setConfirming(false);
+                  onMerge();
+                }}
+                disabled={merging}
+                className="rounded-md bg-red-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-50"
+              >
+                {merging ? "Merging…" : "Confirm merge"}
+              </button>
+              <button
+                onClick={() => setConfirming(false)}
+                className="rounded-md bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-100"
+              >
+                Cancel
+              </button>
+            </>
+          )}
+        </span>
+      </div>
+      {open && (
+        <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+          <div className="rounded-md bg-white p-2">
+            <p className="font-semibold">This record</p>
+            <p className="mt-1 text-zinc-500">See above for full detail.</p>
+          </div>
+          <div className="rounded-md bg-white p-2">
+            {other.isLoading && <p className="text-zinc-500">Loading…</p>}
+            {other.error && <p className="text-red-600">{(other.error as Error).message}</p>}
+            {other.data && (
+              <>
+                <p className="font-semibold">{other.data.title}</p>
+                <p className="mt-1 capitalize text-zinc-500">
+                  {other.data.status} · {other.data.severity}
+                </p>
+                <p className="mt-1 line-clamp-3 text-zinc-600">{other.data.description}</p>
+                <p className="mt-1 tabular-nums text-zinc-400" title={new Date(other.data.created_at).toLocaleString()}>
+                  {timeAgo(other.data.created_at)}
+                </p>
+                <a href={`/incidents/${otherId}`} target="_blank" rel="noreferrer" className="mt-1 inline-block font-medium text-[#2a4a33] hover:underline">
+                  Open full record ↗
+                </a>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </li>
+  );
+}
+
 function collapseHistory(list: StatusHistoryEntry[]): CollapsedGroup[] {
+
   const groups: CollapsedGroup[] = [];
   for (const h of list) {
     const last = groups[groups.length - 1];
@@ -136,8 +242,14 @@ export default function IncidentDetailPage() {
   });
 
   const staffList = useQuery({
-    queryKey: ["admin-users-assign"],
-    queryFn: () => apiFetch<AppUser[]>("/admin/users"),
+    queryKey: ["admin-staff"],
+    queryFn: () => apiFetch<StaffMember[]>("/admin/staff"),
+    retry: false,
+  });
+
+  const dupes = useQuery({
+    queryKey: ["admin-duplicates"],
+    queryFn: () => apiFetch<DuplicatePair[]>("/admin/incidents/duplicates"),
     retry: false,
   });
 
@@ -158,6 +270,49 @@ export default function IncidentDetailPage() {
     onSuccess: () => {
       setNote("");
       refresh();
+    },
+  });
+
+  const staffById = useMemo(() => {
+    const m = new Map<string, StaffMember>();
+    (staffList.data ?? []).forEach((s) => m.set(s.id, s));
+    return m;
+  }, [staffList.data]);
+
+  /** Display name for a staff id — never a raw UUID. */
+  const whoName = (sid: string | null | undefined): string => {
+    if (!sid) return "system";
+    return staffName(staffById.get(sid)?.email, sid);
+  };
+
+  const myDupes = useMemo(
+    () => (dupes.data ?? []).filter((p) => p.a_id === id || p.b_id === id),
+    [dupes.data, id]
+  );
+
+  const merge = useMutation({
+    mutationFn: (duplicateIds: string[]) =>
+      apiFetch(`/admin/incidents/merge`, {
+        method: "POST",
+        body: JSON.stringify({ master_id: id, duplicate_ids: duplicateIds }),
+      }),
+    onSuccess: () => {
+      refresh();
+      qc.invalidateQueries({ queryKey: ["admin-duplicates"] });
+      qc.invalidateQueries({ queryKey: ["admin-incidents"] });
+    },
+  });
+
+  const split = useMutation({
+    mutationFn: () =>
+      apiFetch(`/admin/incidents/split`, {
+        method: "POST",
+        body: JSON.stringify({ incident_id: id }),
+      }),
+    onSuccess: () => {
+      refresh();
+      qc.invalidateQueries({ queryKey: ["admin-duplicates"] });
+      qc.invalidateQueries({ queryKey: ["admin-incidents"] });
     },
   });
 
@@ -513,11 +668,11 @@ export default function IncidentDetailPage() {
                   <option value="">Select staff…</option>
                   {(staffList.data ?? []).map((u) => (
                     <option key={u.id} value={u.id}>
-                      {(u.email ?? u.phone ?? u.device_id ?? u.id).slice(0, 32)}
+                      {staffName(u.email, u.id)} · {u.role} · {u.open_count} open
                     </option>
                   ))}
                 </select>
-                <span title={!assignee ? "Pick a staff member to enable Assign" : `Assign to ${assignee.slice(0, 8)}`}>
+                <span title={!assignee ? "Pick a staff member to enable Assign" : `Assign to ${whoName(assignee)}`}>
                   <button
                     disabled={!assignee}
                     onClick={() => assignee && patch.mutate({ assigned_to: assignee })}
@@ -526,13 +681,71 @@ export default function IncidentDetailPage() {
                     Assign
                   </button>
                 </span>
+                {data.assigned_to && (
+                  <span title="Remove the current owner">
+                    <button
+                      onClick={() => patch.mutate({ assigned_to: null })}
+                      className="inline-flex items-center justify-center rounded-md bg-white px-3 py-2 text-sm font-medium text-zinc-600 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-100"
+                    >
+                      Unassign
+                    </button>
+                  </span>
+                )}
               </div>
               <p className="mt-1 text-xs text-zinc-500">
                 {data.assigned_to
-                  ? `Assigned to ${data.assigned_to.slice(0, 8)}…`
-                  : "Unassigned — pick a staff member above."}
+                  ? `Owned by ${whoName(data.assigned_to)}${staffById.get(data.assigned_to) ? ` (${staffById.get(data.assigned_to)!.role})` : ""} — reassign above or unassign.`
+                  : "Unassigned — pick a staff member above. Only staff can own incidents."}
               </p>
             </div>
+          </Card>
+
+          <Card>
+            <div id="duplicates" className="mb-3 flex scroll-mt-4 items-center gap-2">
+              <h2 className="text-sm font-semibold tracking-wide text-zinc-500">
+                Suspected duplicates
+              </h2>
+              {myDupes.length > 0 && (
+                <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-bold text-purple-800">
+                  {myDupes.length}
+                </span>
+              )}
+              {data.status === "closed" && (
+                <button
+                  onClick={() => split.mutate()}
+                  disabled={split.isPending}
+                  title="Reopen this record for independent triage"
+                  className="ml-auto inline-flex items-center justify-center rounded-md bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-100 disabled:opacity-50"
+                >
+                  {split.isPending ? "Splitting…" : "Split apart"}
+                </button>
+              )}
+            </div>
+            {myDupes.length === 0 ? (
+              <p className="text-sm text-zinc-500">
+                No suspected duplicates for this record — same title within 150m and 24h would show here.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {myDupes.map((p) => {
+                  const otherId = p.a_id === id ? p.b_id : p.a_id;
+                  return (
+                    <CompareRow
+                      key={`${p.a_id}-${p.b_id}`}
+                      pair={p}
+                      otherId={otherId}
+                      merging={merge.isPending}
+                      onMerge={() => merge.mutate([otherId])}
+                    />
+                  );
+                })}
+              </ul>
+            )}
+            {(merge.error ?? split.error) && (
+              <p className="mt-2 text-sm text-red-600">
+                {((merge.error ?? split.error) as Error).message}
+              </p>
+            )}
           </Card>
 
           <Card>
@@ -562,11 +775,11 @@ export default function IncidentDetailPage() {
                     aria-hidden
                     className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#2a4a33] text-[10px] font-bold text-white"
                   >
-                    {initialsOf(n.staff_id)}
+                    {avatarOf(n.staff_id ? whoName(n.staff_id) : null, n.staff_id)}
                   </span>
                   <div className="min-w-0">
                     <p className="text-[11px] font-medium text-zinc-500">
-                      {(n.staff_id ?? "system").slice(0, 18)} · staff
+                      {whoName(n.staff_id)} · staff
                     </p>
                     <p className="mt-0.5 leading-relaxed">{n.note}</p>
                     <p className="mt-0.5 text-xs tabular-nums text-zinc-400" title={new Date(n.created_at).toLocaleString()}>
@@ -625,12 +838,12 @@ export default function IncidentDetailPage() {
                       <p className="mt-0.5 text-xs text-zinc-500">
                         <span
                           className="mr-1 inline-flex h-4 w-4 items-center justify-center rounded-full bg-zinc-200 align-middle text-[8px] font-bold text-zinc-600"
-                          title={first.changed_by ? `Changed by ${first.changed_by}` : "Changed by system"}
+                          title={first.changed_by ? `Changed by ${whoName(first.changed_by)}` : "Changed by system"}
                         >
-                          {initialsOf(first.changed_by)}
+                          {avatarOf(first.changed_by ? whoName(first.changed_by) : null, first.changed_by)}
                         </span>
                         <span title={first.changed_by ?? "system"}>
-                          {(first.changed_by ?? "system").slice(0, 12)}
+                          {whoName(first.changed_by)}
                         </span>{" "}
                         · <span title={new Date(first.changed_at).toLocaleString()}>{timeAgo(first.changed_at)}</span>
                       </p>

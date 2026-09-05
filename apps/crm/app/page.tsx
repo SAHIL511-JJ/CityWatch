@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import type { AnalyticsSummary, Incident } from "@/lib/types";
+import { slaFor } from "@/lib/sla";
 import { Card } from "@/components/ui/card";
 import {
   Area,
@@ -118,7 +119,7 @@ export default function DashboardPage() {
           <Skeleton className="h-7 w-56" />
           <Skeleton className="mt-2 h-4 w-80" />
         </div>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-32" />
           ))}
@@ -165,6 +166,20 @@ export default function DashboardPage() {
   const feed = incidents.slice(0, 6);
   const queue = incidents.filter((i) => i.status === "needs_review" || i.status === "escalated").slice(0, 5);
 
+  const sla = (() => {
+    let overdue = 0;
+    let breaching = 0;
+    let oldest: Incident | null = null;
+    for (const i of incidents) {
+      const s = slaFor(i.created_at, i.severity, i.status);
+      if (!s || s.state === "ok") continue;
+      if (s.state === "overdue") overdue++;
+      else breaching++;
+      if (!oldest || new Date(i.created_at) < new Date(oldest.created_at)) oldest = i;
+    }
+    return { overdue, breaching, oldest };
+  })();
+
   const todayCount = byDay.length > 0 ? byDay[byDay.length - 1].count : 0;
   const prevCount = byDay.length > 1 ? byDay[byDay.length - 2].count : null;
   const delta =
@@ -204,6 +219,33 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
+
+      {(sla.overdue > 0 || sla.breaching > 0) && (
+        <div
+          role="alert"
+          className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-4 py-2.5 text-sm ${
+            sla.overdue > 0
+              ? "border-red-300 bg-red-50 text-red-800"
+              : "border-amber-300 bg-amber-50 text-amber-900"
+          }`}
+        >
+          <strong>
+            {sla.overdue > 0 ? `${sla.overdue} overdue` : `${sla.breaching} breaching SLA`}
+            {sla.breaching > 0 && sla.overdue > 0 && ` · ${sla.breaching} breaching`}
+          </strong>
+          {sla.oldest && (
+            <span className="text-xs">
+              oldest:{" "}
+              <Link href={`/incidents/${sla.oldest.id}`} className="font-semibold underline">
+                {sla.oldest.title}
+              </Link>
+            </span>
+          )}
+          <Link href="/incidents?sort=action" className="ml-auto text-xs font-semibold underline">
+            Open needs-action queue
+          </Link>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Kpi label="Total incidents" value={total} sub={`${byCat.length} categories reporting · ${delta}`} spark={byDay} accent="#14231a" />

@@ -66,6 +66,31 @@ export interface AnalyticsSummary {
   total?: number;
 }
 
+export interface StaffMember {
+  id: string;
+  email: string;
+  role: string;
+  open_count: number;
+}
+
+export interface DuplicatePair {
+  a_id: string;
+  b_id: string;
+  title: string;
+  distance_m: number;
+  hours_apart: number;
+  score: number;
+}
+
+/** Staff display name from email — never a raw UUID in the UI. */
+export function staffName(email: string | null | undefined, id?: string | null): string {
+  if (email) {
+    const prefix = email.split("@")[0];
+    if (prefix) return prefix;
+  }
+  return id ? `staff ${id.slice(0, 8)}` : "staff";
+}
+
 export interface StaffUser {
   id: string;
   email: string;

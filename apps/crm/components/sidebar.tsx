@@ -20,6 +20,7 @@ const ICONS: Record<string, string> = {
   dashboard: "M3 3h4.5v4.5H3zM12.5 3H17v4.5h-4.5zM3 12.5h4.5V17H3zM12.5 12.5H17V17h-4.5z",
   incidents: "M10 3v4M10 11v6M4 6.5h12M6 17.5h8",
   users: "M13.5 13.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3.5 17a5.5 5.5 0 0 1 9-4.2M3.5 17h13",
+  staff: "M4 5.5h12M4 10h12M4 14.5h7M16 15.5l2 2 3.5-4",
   analytics: "M3.5 17V10M8 17V4.5M12.5 17v-6M17 17V7.5",
 };
 
@@ -27,6 +28,7 @@ const TITLES: Record<string, string> = {
   "/": "Dashboard",
   "/incidents": "Incidents",
   "/users": "Users",
+  "/staff": "Staff",
   "/analytics": "Analytics",
 };
 
@@ -107,7 +109,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
     },
     {
       label: "Manage",
-      items: [{ href: "/users", label: "Users", icon: <Icon d={ICONS.users} /> }],
+      items: [
+        { href: "/users", label: "Users", icon: <Icon d={ICONS.users} /> },
+        { href: "/staff", label: "Staff", icon: <Icon d={ICONS.staff} /> },
+      ],
     },
     {
       label: "Insights",
