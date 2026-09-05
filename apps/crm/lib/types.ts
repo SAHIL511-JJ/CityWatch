@@ -61,6 +61,7 @@ export interface IncidentDetail extends Incident {
 export interface AnalyticsSummary {
   by_category: { name: string; count: number }[];
   by_status: { status: string; count: number }[];
+  by_severity: { severity: string; count: number }[];
   by_day: { date: string; count: number }[];
   total?: number;
 }
