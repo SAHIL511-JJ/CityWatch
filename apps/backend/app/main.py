@@ -118,8 +118,8 @@ def incident_out(i: Incident) -> dict:
     }
 
 
-def enqueue_analysis(incident_id: str) -> None:
-    """Best-effort Celery enqueue; never blocks the request when Redis is absent."""
+def enqueue_analysis(incident_id: str) -> bool:
+    """Queue analysis when Redis is available; report whether it was queued."""
     try:
         import socket
         from urllib.parse import urlparse
@@ -130,13 +130,14 @@ def enqueue_analysis(incident_id: str) -> None:
         )
         sock.close()
     except Exception:
-        return  # dev/sqlite or no-Redis boot: incident stays `processing` until /analyze
+        return False
     try:
         from .worker import analyze_incident
 
         getattr(analyze_incident, "delay")(str(incident_id))
+        return True
     except Exception:
-        pass
+        return False
 
 
 def seed() -> None:
@@ -302,7 +303,22 @@ def create_incident(
         )
     )
     db.commit()
-    enqueue_analysis(inc.id)
+    if not enqueue_analysis(inc.id):
+        # Redis/Celery is optional. Never leave a citizen's report stuck in
+        # processing just because the background worker is unavailable.
+        from .worker import apply_ai_result, run_ai
+
+        try:
+            result = run_ai(inc.title or "", inc.description or "", inc.photo_url)
+        except Exception:
+            result = {
+                "is_legitimate": True,
+                "category": "other",
+                "severity": "medium",
+                "confidence": 0.0,
+                "reason": "AI analysis unavailable; manual review required",
+            }
+        apply_ai_result(db, inc, result)
     return {"id": str(inc.id), "status": inc.status, "photo_url": photo_url}
 
 
