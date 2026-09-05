@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import L from "leaflet";
-import { CircleMarker, MapContainer, Popup, TileLayer, useMap } from "react-leaflet";
+import { Circle, CircleMarker, MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import { ZoomHandlers } from "./leaflet-controls";
 
 export interface HeatPoint {
@@ -13,28 +13,78 @@ export interface HeatPoint {
   status?: string;
 }
 
-function FsControl({ fs, setFs }: { fs: boolean; setFs: (v: boolean) => void }) {
+function MapControls({ fs, setFs }: { fs: boolean; setFs: (v: boolean) => void }) {
   const map = useMap();
+  const [found, setFound] = useState<{ pos: [number, number]; acc: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     const t = setTimeout(() => map.invalidateSize(), 100);
     return () => clearTimeout(t);
   }, [map, fs]);
+  useEffect(() => {
+    const onLoc = (e: L.LocationEvent) => {
+      setErr(null);
+      setFound({ pos: [e.latlng.lat, e.latlng.lng], acc: e.accuracy });
+      map.flyTo(e.latlng, 13, { duration: 1.2 });
+    };
+    const onErr = () => setErr("Couldn't get your location — check browser permission.");
+    map.on("locationfound", onLoc);
+    map.on("locationerror", onErr);
+    return () => {
+      map.off("locationfound", onLoc);
+      map.off("locationerror", onErr);
+    };
+  }, [map]);
   return (
-    <div className="absolute right-3 top-3 z-[800]">
-      <button
-        title={fs ? "Exit fullscreen" : "Fullscreen map"}
-        aria-label={fs ? "Exit fullscreen" : "Fullscreen map"}
-        onClick={(e) => {
-          e.stopPropagation();
-          setFs(!fs);
-        }}
-        className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-700 shadow-sm hover:bg-zinc-100"
-      >
-        <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
-          <path d="M8 3H3v5M12 17h5v-5M3 3l6 6M17 17l-6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
-    </div>
+    <>
+      <div className="absolute right-3 top-3 z-[800] flex flex-col gap-2">
+        <button
+          title="Go to my location"
+          aria-label="Go to my location"
+          onClick={(e) => {
+            e.stopPropagation();
+            setErr(null);
+            map.locate({ setView: false, timeout: 10000 });
+          }}
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-700 shadow-sm hover:bg-zinc-100"
+        >
+          <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
+            <circle cx="10" cy="10" r="3" stroke="currentColor" strokeWidth="1.8" />
+            <path d="M10 1.5v3M10 15.5v3M1.5 10h3M15.5 10h3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+          </svg>
+        </button>
+        <button
+          title={fs ? "Exit fullscreen" : "Fullscreen map"}
+          aria-label={fs ? "Exit fullscreen" : "Fullscreen map"}
+          onClick={(e) => {
+            e.stopPropagation();
+            setFs(!fs);
+          }}
+          className="flex h-8 w-8 items-center justify-center rounded-md border border-zinc-300 bg-white text-zinc-700 shadow-sm hover:bg-zinc-100"
+        >
+          <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4">
+            <path d="M8 3H3v5M12 17h5v-5M3 3l6 6M17 17l-6-6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </div>
+      {found && (
+        <>
+          <Marker position={found.pos}>
+            <Popup>You are here</Popup>
+          </Marker>
+          <Circle
+            center={found.pos}
+            radius={Math.max(found.acc, 20)}
+            pathOptions={{ color: "#2563eb", fillOpacity: 0.1 }}
+          />
+        </>
+      )}
+      {err && (
+        <p className="absolute bottom-6 left-3 z-[800] rounded-md bg-white px-2 py-1 text-xs text-red-600 shadow">
+          {err}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -90,7 +140,7 @@ export function HeatmapMap({ points }: { points: HeatPoint[] }) {
         attribution="Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom"
       />
       <FitToPoints pts={points.map((p) => [p.lat, p.lng])} />
-      <FsControl fs={fs} setFs={setFs} />
+      <MapControls fs={fs} setFs={setFs} />
       <ZoomHandlers />
       {points.map((p, i) => (
         <CircleMarker
