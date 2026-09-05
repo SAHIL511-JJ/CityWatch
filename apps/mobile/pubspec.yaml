@@ -1,7 +1,7 @@
 name: incident_reporter
 description: Citizen incident-reporting Flutter app. Talks to FastAPI only (dio). No supabase-flutter.
 publish_to: "none"
-version: 0.1.0
+version: 0.1.0+20260906
 
 environment:
   sdk: ">=3.2.0 <4.0.0"

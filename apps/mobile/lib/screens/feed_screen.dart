@@ -1,22 +1,27 @@
-import 'dart:typed_data';
+import 'dart:async';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../api_client.dart';
+import '../cw_theme.dart';
+import '../feed_filters.dart';
 
-final _radiusKmProvider = StateProvider<double>((ref) => 10);
-final _severityProvider = StateProvider<String>((ref) => '');
+enum _FeedState { loading, denied, failed, offline, empty, ready }
 
 String _timeAgo(String? iso) {
   if (iso == null || iso.isEmpty) return '';
-  final ms = DateTime.now().difference(DateTime.tryParse(iso) ?? DateTime.now());
-  if (ms.inMinutes < 1) return 'just now';
-  if (ms.inMinutes < 60) return '${ms.inMinutes}m ago';
-  if (ms.inHours < 24) return '${ms.inHours}h ago';
-  if (ms.inDays < 30) return '${ms.inDays}d ago';
+  final t = DateTime.tryParse(iso);
+  if (t == null) return '';
+  final d = DateTime.now().difference(t);
+  if (d.inMinutes < 1) return 'just now';
+  if (d.inMinutes < 60) return '${d.inMinutes}m ago';
+  if (d.inHours < 24) return '${d.inHours}h ago';
+  if (d.inDays < 30) return '${d.inDays}d ago';
   return iso.substring(0, 10);
 }
 
@@ -24,19 +29,6 @@ String _distance(double lat1, double lng1, double lat2, double lng2) {
   final m = Geolocator.distanceBetween(lat1, lng1, lat2, lng2);
   if (m < 1000) return '${m.toStringAsFixed(0)}m';
   return '${(m / 1000).toStringAsFixed(1)}km';
-}
-
-Color _severityColor(String? severity) {
-  switch (severity) {
-    case 'critical':
-      return Colors.red.shade800;
-    case 'high':
-      return Colors.deepOrange;
-    case 'medium':
-      return Colors.amber.shade800;
-    default:
-      return Colors.blueGrey;
-  }
 }
 
 class FeedScreen extends ConsumerStatefulWidget {
@@ -48,11 +40,11 @@ class FeedScreen extends ConsumerStatefulWidget {
 
 class _FeedScreenState extends ConsumerState<FeedScreen> {
   List<IncidentItem> _items = [];
-  bool _loading = false;
-  String? _error;
+  _FeedState _state = _FeedState.loading;
+  String _errorDetail = '';
   Position? _pos;
-  bool _gpsDenied = false;
-  final _pager = PageController();
+  DateTime? _posAt;
+  bool _manualPos = false;
 
   @override
   void initState() {
@@ -60,52 +52,171 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     Future.microtask(_refresh);
   }
 
-  @override
-  void dispose() {
-    _pager.dispose();
-    super.dispose();
+  Future<Position> _locate() async {
+    var perm = await Geolocator.checkPermission();
+    if (perm == LocationPermission.denied) {
+      perm = await Geolocator.requestPermission();
+    }
+    if (perm == LocationPermission.denied ||
+        perm == LocationPermission.deniedForever) {
+      throw const _Denied();
+    }
+    return Geolocator.getCurrentPosition(
+      timeLimit: const Duration(seconds: 10),
+    ).timeout(const Duration(seconds: 12));
   }
 
   Future<void> _refresh() async {
     setState(() {
-      _loading = true;
-      _error = null;
-      _gpsDenied = false;
+      _state = _FeedState.loading;
+      _errorDetail = '';
     });
+    Position pos;
     try {
-      var perm = await Geolocator.checkPermission();
-      if (perm == LocationPermission.denied) {
-        perm = await Geolocator.requestPermission();
-      }
-      if (perm == LocationPermission.denied ||
-          perm == LocationPermission.deniedForever) {
-        if (!mounted) return;
-        setState(() {
-          _gpsDenied = true;
-          _loading = false;
-        });
-        return;
-      }
-      final pos = await Geolocator.getCurrentPosition();
-      final radius = ref.read(_radiusKmProvider);
-      final sev = ref.read(_severityProvider);
+      pos = await _locate();
+    } on _Denied {
+      if (!mounted) return;
+      setState(() => _state = _FeedState.denied);
+      return;
+    } on TimeoutException {
+      if (!mounted) return;
+      setState(() {
+        _state = _FeedState.failed;
+        _errorDetail = 'GPS timed out after 12s.';
+      });
+      return;
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _state = _FeedState.failed;
+        _errorDetail = e.toString();
+      });
+      return;
+    }
+    try {
       final items = await ref.read(apiClientProvider).fetchFeed(
             lat: pos.latitude,
             lng: pos.longitude,
-            radiusKm: radius,
-            severity: sev.isEmpty ? null : sev,
+            radiusKm: ref.read(radiusKmProvider),
+            severity: ref.read(severityFilterProvider).isEmpty
+                ? null
+                : ref.read(severityFilterProvider),
+            category: ref.read(categoryFilterProvider).isEmpty
+                ? null
+                : ref.read(categoryFilterProvider),
           );
       if (!mounted) return;
       setState(() {
         _pos = pos;
+        _posAt = DateTime.now();
+        _manualPos = false;
         _items = items;
-        _loading = false;
+        _state = items.isEmpty ? _FeedState.empty : _FeedState.ready;
+      });
+    } on DioException catch (e) {
+      if (!mounted) return;
+      final offline = e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.unknown;
+      setState(() {
+        _pos = pos;
+        _posAt = DateTime.now();
+        _state = offline ? _FeedState.offline : _FeedState.failed;
+        _errorDetail = e.message ?? e.toString();
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
-        _loading = false;
+        _state = _FeedState.failed;
+        _errorDetail = e.toString();
+      });
+    }
+  }
+
+  Future<void> _enterLocationManually() async {
+    final latC = TextEditingController(
+        text: _pos == null ? '' : _pos!.latitude.toStringAsFixed(5));
+    final lngC = TextEditingController(
+        text: _pos == null ? '' : _pos!.longitude.toStringAsFixed(5));
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Enter location'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: latC,
+              keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true, signed: true),
+              decoration: const InputDecoration(
+                  labelText: 'Latitude', hintText: '18.5196'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: lngC,
+              keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true, signed: true),
+              decoration: const InputDecoration(
+                  labelText: 'Longitude', hintText: '73.8554'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Use this')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final lat = double.tryParse(latC.text.trim());
+    final lng = double.tryParse(lngC.text.trim());
+    if (lat == null || lng == null || lat.abs() > 90 || lng.abs() > 180) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Enter valid coords, e.g. 18.5196, 73.8554.')),
+        );
+      }
+      return;
+    }
+    setState(() {
+      _pos = Position(
+        latitude: lat,
+        longitude: lng,
+        timestamp: DateTime.now(),
+        accuracy: 0,
+        altitude: 0,
+        altitudeAccuracy: 0,
+        heading: 0,
+        headingAccuracy: 0,
+        speed: 0,
+        speedAccuracy: 0,
+      );
+      _manualPos = true;
+      _posAt = DateTime.now();
+      _state = _FeedState.loading;
+    });
+    try {
+      final items = await ref.read(apiClientProvider).fetchFeed(
+            lat: lat,
+            lng: lng,
+            radiusKm: ref.read(radiusKmProvider),
+          );
+      if (!mounted) return;
+      setState(() {
+        _items = items;
+        _state = items.isEmpty ? _FeedState.empty : _FeedState.ready;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _state = _FeedState.failed;
+        _errorDetail = e.toString();
       });
     }
   }
@@ -118,12 +229,27 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final radius = ref.watch(_radiusKmProvider);
-    final severity = ref.watch(_severityProvider);
-
+    final radius = ref.watch(radiusKmProvider);
+    final severity = ref.watch(severityFilterProvider);
+    final category = ref.watch(categoryFilterProvider);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Near you'),
+        automaticallyImplyLeading: false,
+        title: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Near you'),
+            Text(
+              'Verified reports around your current spot',
+              style: TextStyle(
+                color: Color(0xFFB9C9BD),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                letterSpacing: .1,
+              ),
+            ),
+          ],
+        ),
         actions: [
           IconButton(
             tooltip: 'Refresh',
@@ -134,222 +260,501 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Row(
-              children: [
-                DropdownButton<double>(
-                  value: radius,
-                  items: const [5, 10, 25, 50]
-                      .map((v) => DropdownMenuItem(
-                          value: v.toDouble(), child: Text('${v}km')))
-                      .toList(),
-                  onChanged: (v) {
-                    if (v != null) {
-                      ref.read(_radiusKmProvider.notifier).state = v;
-                      _refresh();
-                    }
-                  },
-                ),
-                const SizedBox(width: 12),
-                DropdownButton<String>(
-                  value: severity,
-                  items: const [
-                    DropdownMenuItem(value: '', child: Text('All')),
-                    DropdownMenuItem(value: 'low', child: Text('Low')),
-                    DropdownMenuItem(value: 'medium', child: Text('Medium')),
-                    DropdownMenuItem(value: 'high', child: Text('High')),
-                    DropdownMenuItem(
-                        value: 'critical', child: Text('Critical')),
-                  ],
-                  onChanged: (v) {
-                    ref.read(_severityProvider.notifier).state = v ?? '';
-                    _refresh();
-                  },
-                ),
-              ],
-            ),
-          ),
+          _filterBar(radius, severity, category),
+          _gpsStrip(),
           Expanded(child: _body()),
         ],
       ),
     );
   }
 
-  Widget _body() {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+  Widget _filterBar(double radius, String severity, String category) {
+    const radiusOptions = [5.0, 10.0, 25.0, 50.0];
+    var shown = radiusOptions.first;
+    for (final o in radiusOptions) {
+      if ((radius - o).abs() < (radius - shown).abs()) shown = o;
     }
-    if (_gpsDenied) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+    return Container(
+      color: Theme.of(context).colorScheme.surface,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              const Text('Location off — turn on GPS to see nearby reports.'),
-              const SizedBox(height: 12),
-              FilledButton(onPressed: _refresh, child: const Text('Retry')),
+              _filterDropdown<double>(
+                icon: Icons.radar_outlined,
+                value: shown,
+                label: '${shown.toStringAsFixed(0)} km',
+                items: const [5, 10, 25, 50]
+                    .map((v) => DropdownMenuItem(
+                        value: v.toDouble(), child: Text('${v}km')))
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) {
+                    ref.read(radiusKmProvider.notifier).state = v;
+                    if (_pos != null) _refresh();
+                  }
+                },
+              ),
+              const SizedBox(width: 8),
+              _filterDropdown<String>(
+                icon: Icons.tune,
+                value: severity,
+                label: severityLabel(severity),
+                items: feedSeverities
+                    .map((s) => DropdownMenuItem(
+                        value: s, child: Text(severityLabel(s))))
+                    .toList(),
+                onChanged: (v) {
+                  ref.read(severityFilterProvider.notifier).state = v ?? '';
+                  if (_pos != null) _refresh();
+                },
+              ),
+              const Spacer(),
+              Text(
+                '${_items.length} nearby',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
             ],
           ),
-        ),
-      );
-    }
-    if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('Failed to load feed:\n$_error'),
-              const SizedBox(height: 12),
-              FilledButton(onPressed: _refresh, child: const Text('Retry')),
-            ],
+          const SizedBox(height: 14),
+          Text(
+            'Browse by type',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: CwColors.ink,
+                  fontWeight: FontWeight.w700,
+                ),
           ),
-        ),
-      );
-    }
-    if (_items.isEmpty) {
-      return const Center(child: Text('No reports near you yet.'));
-    }
-    return RefreshIndicator(
-      onRefresh: _refresh,
-      child: PageView.builder(
-        controller: _pager,
-        scrollDirection: Axis.vertical,
-        itemCount: _items.length + 1,
-        itemBuilder: (context, i) {
-          if (i >= _items.length) {
-            return const Center(child: Text("You're all caught up."));
-          }
-          return _reelCard(_items[i]);
-        },
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: feedCategories.map((c) {
+                final sel = category == c;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    avatar: c.isEmpty
+                        ? const Icon(Icons.apps, size: 16)
+                        : Icon(_categoryIcon(c), size: 15),
+                    label: Text(categoryLabel(c)),
+                    selected: sel,
+                    onSelected: (_) {
+                      ref.read(categoryFilterProvider.notifier).state = c;
+                      if (_pos != null) _refresh();
+                    },
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _photo(IncidentItem e) {
-    final api = ref.read(apiClientProvider);
-    return FutureBuilder<List<int>?>(
-      future: api.fetchPhotoBytes(e.id),
-      builder: (context, snap) {
-        if (snap.connectionState == ConnectionState.waiting) {
-          return Container(
-            color: Colors.grey.shade200,
-            child: const Center(child: CircularProgressIndicator()),
-          );
-        }
-        final bytes = snap.data;
-        if (!ApiClient.hasRealPhoto(bytes)) {
-          return Container(
-            color: Colors.grey.shade200,
-            child: const Center(child: Text('Photo unavailable')),
-          );
-        }
-        return Image.memory(Uint8List.fromList(bytes!), fit: BoxFit.cover);
-      },
+  Widget _filterDropdown<T>({
+    required IconData icon,
+    required T value,
+    required String label,
+    required List<DropdownMenuItem<T>> items,
+    required ValueChanged<T?> onChanged,
+  }) {
+    return Container(
+      height: 40,
+      padding: const EdgeInsets.only(left: 10),
+      decoration: BoxDecoration(
+        color: CwColors.cream,
+        borderRadius: BorderRadius.circular(11),
+        border: Border.all(color: CwColors.sand),
+      ),
+      child: PopupMenuButton<T>(
+        tooltip: label,
+        color: CwColors.paper,
+        elevation: 10,
+        offset: const Offset(0, 8),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: CwColors.sand),
+        ),
+        onSelected: onChanged,
+        itemBuilder: (_) => items
+            .map(
+              (item) => PopupMenuItem<T>(
+                value: item.value,
+                height: 44,
+                child: Row(
+                  children: [
+                    Expanded(child: item.child),
+                    if (item.value == value)
+                      const Icon(Icons.check_rounded,
+                          size: 18, color: CwColors.pine),
+                  ],
+                ),
+              ),
+            )
+            .toList(),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: CwColors.pine),
+            const SizedBox(width: 7),
+            Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(width: 4),
+            const Icon(Icons.expand_more, size: 18),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _reelCard(IncidentItem e) {
+  IconData _categoryIcon(String category) {
+    switch (category) {
+      case 'crime':
+        return Icons.warning_amber_rounded;
+      case 'fire':
+        return Icons.local_fire_department_outlined;
+      case 'accident':
+        return Icons.car_crash_outlined;
+      case 'hazard':
+        return Icons.construction_outlined;
+      default:
+        return Icons.more_horiz;
+    }
+  }
+
+  Widget _gpsStrip() {
+    if (_pos == null) return const SizedBox.shrink();
+    final age = _posAt == null ? null : DateTime.now().difference(_posAt!);
+    final stale = age != null && age.inSeconds > 60;
+    final acc = _pos!.accuracy;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      color: stale ? Colors.amber.shade100 : Colors.transparent,
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              _manualPos
+                  ? 'Manual location${stale ? ' · stale, re-locate' : ''}'
+                  : acc > 0
+                      ? 'GPS ±${acc.toStringAsFixed(0)}m${stale ? ' · stale, re-locate' : ''}'
+                      : 'GPS location${stale ? ' · stale, re-locate' : ''}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+          TextButton.icon(
+            onPressed: _refresh,
+            icon: const Icon(Icons.my_location, size: 16),
+            label: const Text('Re-locate'),
+          ),
+          TextButton(
+            onPressed: _enterLocationManually,
+            child: const Text('Edit'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _body() {
+    switch (_state) {
+      case _FeedState.loading:
+        return ListView.separated(
+          itemCount: 4,
+          separatorBuilder: (_, __) => const SizedBox(height: 8),
+          padding: const EdgeInsets.all(12),
+          itemBuilder: (_, __) => Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(height: 120, color: Colors.grey.shade300),
+                  const SizedBox(height: 8),
+                  Container(
+                      height: 16, width: 180, color: Colors.grey.shade300),
+                  const SizedBox(height: 6),
+                  Container(
+                      height: 12,
+                      width: double.infinity,
+                      color: Colors.grey.shade200),
+                ],
+              ),
+            ),
+          ),
+        );
+      case _FeedState.denied:
+        return _stateCard(
+          'Location permission off',
+          'Turn on location to see nearby reports — or enter it by hand.',
+          [
+            FilledButton(onPressed: _refresh, child: const Text('Retry')),
+            OutlinedButton(
+                onPressed: _enterLocationManually,
+                child: const Text('Enter location manually')),
+          ],
+        );
+      case _FeedState.failed:
+        return _stateCard(
+          'Could not get your spot',
+          _errorDetail.isEmpty
+              ? 'GPS did not respond. Try again or enter it by hand.'
+              : _errorDetail,
+          [
+            FilledButton(onPressed: _refresh, child: const Text('Retry')),
+            OutlinedButton(
+                onPressed: _enterLocationManually,
+                child: const Text('Enter location manually')),
+          ],
+        );
+      case _FeedState.offline:
+        return _stateCard(
+          'You are offline',
+          'Check your connection, then retry. Your reports stay safe.',
+          [FilledButton(onPressed: _refresh, child: const Text('Retry'))],
+        );
+      case _FeedState.empty:
+        return _stateCard(
+          'No reports near you yet',
+          'Be the first to report — it takes a minute.',
+          [
+            OutlinedButton(
+                onPressed: _enterLocationManually,
+                child: const Text('Try another spot')),
+          ],
+        );
+      case _FeedState.ready:
+        return RefreshIndicator(
+          onRefresh: _refresh,
+          child: ListView.separated(
+            itemCount: _items.length + 1,
+            separatorBuilder: (_, __) => const SizedBox(height: 8),
+            padding: const EdgeInsets.all(12),
+            itemBuilder: (context, i) {
+              if (i >= _items.length) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Center(child: Text("You're all caught up.")),
+                );
+              }
+              return _card(_items[i]);
+            },
+          ),
+        );
+    }
+  }
+
+  Widget _stateCard(String title, String sub, List<Widget> actions) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(title, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Text(sub, textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: actions),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _card(IncidentItem e) {
     final dist = _pos == null
         ? ''
         : _distance(_pos!.latitude, _pos!.longitude, e.lat, e.lng);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: _photo(e),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: _severityColor(e.severity),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      (e.severity ?? 'low').toUpperCase(),
-                      style: const TextStyle(color: Colors.white, fontSize: 12),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      e.title,
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              Text(
-                [_timeAgo(e.createdAt), dist, 'verified']
-                    .where((s) => s.isNotEmpty)
-                    .join(' . '),
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 8),
-              Text(e.description, maxLines: 3, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  TextButton.icon(
-                    onPressed: () => _openInMaps(e),
-                    icon: const Icon(Icons.map_outlined),
-                    label: const Text('Open in Google Maps'),
-                  ),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () => _showDetail(e),
-                    child: const Text('Details'),
-                  ),
-                ],
-              ),
-              const Center(
-                child: Text('swipe up for next ^',
-                    style: TextStyle(fontSize: 12, color: Colors.grey)),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  void _showDetail(IncidentItem e) {
-    showModalBottomSheet<void>(
-      context: context,
-      builder: (context) => Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+    final meta = [
+      _timeAgo(e.createdAt),
+      dist,
+      'verified',
+    ].where((s) => s.isNotEmpty).join(' · ');
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _showDetail(e),
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(e.title, style: Theme.of(context).textTheme.titleLarge),
-            const SizedBox(height: 8),
-            Text(e.description),
-            const SizedBox(height: 8),
-            Text('${e.lat.toStringAsFixed(5)}, ${e.lng.toStringAsFixed(5)}'),
-            if (e.address != null && e.address!.isNotEmpty)
-              Text(e.address!),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: () => _openInMaps(e),
-              icon: const Icon(Icons.map_outlined),
-              label: const Text('Open in Google Maps'),
+            Container(width: 6, color: severityColor(e.severity)),
+            SizedBox(
+              width: 96,
+              height: 96,
+              child: _thumb(e.id),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(e.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleSmall),
+                    const SizedBox(height: 2),
+                    Text(meta, style: Theme.of(context).textTheme.bodySmall),
+                    const SizedBox(height: 4),
+                    Text(e.description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                ),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.all(8),
+              child: Icon(Icons.chevron_right, color: Colors.grey),
             ),
           ],
         ),
       ),
     );
   }
+
+  Widget _thumb(String id) {
+    final api = ref.read(apiClientProvider);
+    return FutureBuilder<List<int>?>(
+      future: api.fetchPhotoBytes(id),
+      builder: (context, snap) {
+        if (snap.connectionState == ConnectionState.waiting) {
+          return Container(color: Colors.grey.shade200);
+        }
+        if (!ApiClient.hasRealPhoto(snap.data)) {
+          return Container(
+            color: Colors.grey.shade200,
+            child: const Icon(Icons.image_not_supported_outlined,
+                color: Colors.grey),
+          );
+        }
+        return Image.memory(
+          Uint8List.fromList(snap.data!),
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Container(
+            color: Colors.grey.shade200,
+            child: const Icon(Icons.broken_image_outlined, color: Colors.grey),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showDetail(IncidentItem e) {
+    final api = ref.read(apiClientProvider);
+    final dist = _pos == null
+        ? ''
+        : _distance(_pos!.latitude, _pos!.longitude, e.lat, e.lng);
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.85,
+        builder: (_, ctl) => ListView(
+          controller: ctl,
+          padding: const EdgeInsets.all(20),
+          children: [
+            FutureBuilder<List<int>?>(
+              future: api.fetchPhotoBytes(e.id),
+              builder: (context, snap) {
+                if (!ApiClient.hasRealPhoto(snap.data)) {
+                  return Container(
+                    height: 160,
+                    color: Colors.grey.shade200,
+                    child: const Center(child: Text('Photo unavailable')),
+                  );
+                }
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return Container(height: 160, color: Colors.grey.shade200);
+                }
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.memory(Uint8List.fromList(snap.data!),
+                      height: 220, fit: BoxFit.cover),
+                );
+              },
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                _chip((e.severity ?? 'low').toUpperCase(),
+                    severityColor(e.severity), Colors.white),
+                const SizedBox(width: 8),
+                _chip('VERIFIED', Colors.green.shade700, Colors.white),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(e.title, style: Theme.of(context).textTheme.headlineSmall),
+            const SizedBox(height: 4),
+            Text(
+              [_timeAgo(e.createdAt), dist]
+                  .where((s) => s.isNotEmpty)
+                  .join(' · '),
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            Text(e.description),
+            const SizedBox(height: 12),
+            Text(
+              e.address != null && e.address!.isNotEmpty
+                  ? e.address!
+                  : '${e.lat.toStringAsFixed(5)}, ${e.lng.toStringAsFixed(5)}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            if (e.address != null && e.address!.isNotEmpty)
+              Text('${e.lat.toStringAsFixed(5)}, ${e.lng.toStringAsFixed(5)}',
+                  style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: () => _openInMaps(e),
+                    icon: const Icon(Icons.map_outlined),
+                    label: const Text('Open in Google Maps'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(
+                        text:
+                            'https://www.google.com/maps/search/?api=1&query=${e.lat},${e.lng}'));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Location link copied.')),
+                    );
+                  },
+                  icon: const Icon(Icons.link),
+                  label: const Text('Copy link'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _chip(String label, Color bg, Color fg) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
+      child: Text(label, style: TextStyle(color: fg, fontSize: 12)),
+    );
+  }
+}
+
+class _Denied implements Exception {
+  const _Denied();
 }

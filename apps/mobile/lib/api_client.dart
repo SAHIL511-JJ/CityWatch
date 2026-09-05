@@ -140,6 +140,31 @@ class ApiClient {
     return res.data ?? <String, dynamic>{};
   }
 
+  /// Same as [createIncident] but takes raw bytes (web-safe, outbox retries).
+  Future<Map<String, dynamic>> createIncidentBytes({
+    required String title,
+    required String description,
+    required double lat,
+    required double lng,
+    String? address,
+    required List<int> photoBytes,
+    required String filename,
+  }) async {
+    final form = FormData.fromMap({
+      'title': title,
+      'description': description,
+      'lat': lat,
+      'lng': lng,
+      if (address != null && address.isNotEmpty) 'address': address,
+      'photo': MultipartFile.fromBytes(photoBytes, filename: filename),
+    });
+    final res = await _dio.post<Map<String, dynamic>>(
+      '/incidents',
+      data: form,
+    );
+    return res.data ?? <String, dynamic>{};
+  }
+
   /// GET /incidents?lat&lng&radius_km&severity&category — verified only.
   Future<List<IncidentItem>> fetchFeed({
     required double lat,

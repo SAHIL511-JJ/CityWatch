@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'auth_provider.dart';
+import 'cw_theme.dart';
+import 'outbox.dart';
 import 'screens/feed_screen.dart';
+import 'screens/my_reports_screen.dart';
+import 'screens/profile_screen.dart';
 import 'screens/report_screen.dart';
 
 Future<void> main() async {
@@ -29,8 +33,14 @@ class _IncidentReporterAppState extends ConsumerState<IncidentReporterApp> {
         try {
           await auth.ensureAnonymous();
         } catch (_) {
-          // Offline first-run: user can retry from settings/verify.
+          // Offline first-run: feed shows the offline state with retry.
         }
+      }
+      // KAN-28: flush any reports queued while offline.
+      try {
+        await ref.read(outboxProvider.notifier).retryAll();
+      } catch (_) {
+        // Retry surfaces inside My reports; never block boot.
       }
     });
   }
@@ -38,11 +48,9 @@ class _IncidentReporterAppState extends ConsumerState<IncidentReporterApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Incident Reporter',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepOrange),
-        useMaterial3: true,
-      ),
+      title: 'CityWatch',
+      debugShowCheckedModeBanner: false,
+      theme: cityWatchTheme(),
       home: const HomeShell(),
     );
   }
@@ -61,6 +69,8 @@ class _HomeShellState extends State<HomeShell> {
   static const _pages = [
     FeedScreen(),
     ReportScreen(),
+    MyReportsScreen(),
+    ProfileScreen(),
   ];
 
   @override
@@ -80,6 +90,16 @@ class _HomeShellState extends State<HomeShell> {
             icon: Icon(Icons.add_a_photo_outlined),
             selectedIcon: Icon(Icons.add_a_photo),
             label: 'Report',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.history_outlined),
+            selectedIcon: Icon(Icons.history),
+            label: 'My reports',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outlined),
+            selectedIcon: Icon(Icons.person),
+            label: 'Profile',
           ),
         ],
       ),

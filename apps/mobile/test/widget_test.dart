@@ -9,5 +9,7 @@ void main() {
     await tester.pump();
     expect(find.text('Feed'), findsWidgets);
     expect(find.text('Report'), findsWidgets);
+    expect(find.text('My reports'), findsWidgets);
+    expect(find.text('Profile'), findsWidgets);
   });
 }
