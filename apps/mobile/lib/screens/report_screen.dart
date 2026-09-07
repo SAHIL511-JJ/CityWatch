@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 
 import '../api_client.dart';
+import '../cw_theme.dart';
 import '../outbox.dart';
 
 const _maxPhotoBytes = 8 * 1024 * 1024;
@@ -27,7 +28,6 @@ class ReportScreen extends ConsumerStatefulWidget {
 }
 
 class _ReportScreenState extends ConsumerState<ReportScreen> {
-
   final _title = TextEditingController();
   final _description = TextEditingController();
   final _address = TextEditingController();
@@ -70,8 +70,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
     _title.text = await storage.read(key: '${_kDraftPrefix}title') ?? '';
     _description.text =
         await storage.read(key: '${_kDraftPrefix}description') ?? '';
-    _address.text =
-        await storage.read(key: '${_kDraftPrefix}address') ?? '';
+    _address.text = await storage.read(key: '${_kDraftPrefix}address') ?? '';
     final lat = await storage.read(key: '${_kDraftPrefix}lat');
     final lng = await storage.read(key: '${_kDraftPrefix}lng');
     if (!mounted) return;
@@ -90,10 +89,8 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
         key: '${_kDraftPrefix}description', value: _description.text);
     await storage.write(key: '${_kDraftPrefix}address', value: _address.text);
     if (_lat != null) {
-      await storage.write(
-          key: '${_kDraftPrefix}lat', value: _lat.toString());
-      await storage.write(
-          key: '${_kDraftPrefix}lng', value: _lng.toString());
+      await storage.write(key: '${_kDraftPrefix}lat', value: _lat.toString());
+      await storage.write(key: '${_kDraftPrefix}lng', value: _lng.toString());
     }
   }
 
@@ -113,14 +110,13 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
     if (file == null) return;
     final ext = file.path.split('.').last.toLowerCase();
     if (!_allowedExts.contains(ext)) {
-      setState(
-          () => _photoError = 'Only jpg or png photos work here.');
+      setState(() => _photoError = 'Only jpg or png photos work here.');
       return;
     }
     final bytes = await file.readAsBytes();
     if (bytes.lengthInBytes > _maxPhotoBytes) {
-      setState(() => _photoError =
-          'That photo is over 8MB — pick a smaller one.');
+      setState(
+          () => _photoError = 'That photo is over 8MB — pick a smaller one.');
       return;
     }
     setState(() {
@@ -157,19 +153,17 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
       setState(() => _gpsError =
           'Location permission is off — turn it on to tag your report.');
     } on TimeoutException {
-      setState(() => _gpsError =
-          'GPS timed out. Step outside or retry in a moment.');
+      setState(() =>
+          _gpsError = 'GPS timed out. Step outside or retry in a moment.');
     } catch (_) {
-      setState(
-          () => _gpsError = 'Could not read GPS. Retry in a moment.');
+      setState(() => _gpsError = 'Could not read GPS. Retry in a moment.');
     } finally {
       if (mounted) setState(() => _locating = false);
     }
   }
 
   bool get _detailsOk =>
-      _title.text.trim().isNotEmpty &&
-      _description.text.trim().isNotEmpty;
+      _title.text.trim().isNotEmpty && _description.text.trim().isNotEmpty;
 
   Future<void> _submit() async {
     setState(() => _submitting = true);
@@ -181,8 +175,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
         description: _description.text.trim(),
         lat: _lat!,
         lng: _lng!,
-        address:
-            _address.text.trim().isEmpty ? null : _address.text.trim(),
+        address: _address.text.trim().isEmpty ? null : _address.text.trim(),
         photoBytes: _photoBytes!,
         filename: _photoName.isEmpty ? 'photo.jpg' : _photoName,
       );
@@ -202,9 +195,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
           id: const Uuid().v4(),
           title: _title.text.trim(),
           description: _description.text.trim(),
-          address: _address.text.trim().isEmpty
-              ? null
-              : _address.text.trim(),
+          address: _address.text.trim().isEmpty ? null : _address.text.trim(),
           lat: _lat!,
           lng: _lng!,
           photoBase64: base64Encode(_photoBytes!),
@@ -233,8 +224,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
       if (!mounted) return;
       setState(() => _submitting = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Could not send. Try again in a bit.')),
+        const SnackBar(content: Text('Could not send. Try again in a bit.')),
       );
     }
   }
@@ -263,192 +253,270 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
   @override
   Widget build(BuildContext context) {
     if (_sentId != null) return _success();
-    return Scaffold(
-      appBar: AppBar(title: const Text('Report incident')),
-      body: Stepper(
-        currentStep: _step,
-        onStepTapped: (i) => setState(() => _step = i),
-        onStepContinue: _continue,
-        onStepCancel:
-            _step == 0 ? null : () => setState(() => _step -= 1),
-        controlsBuilder: (context, details) => Padding(
-          padding: const EdgeInsets.only(top: 12),
-          child: Row(
+    const titles = [
+      'Tell us what happened.',
+      'A photo tells the story.',
+      'Put it on the map.'
+    ];
+    const descriptions = [
+      'Start with the essentials. A clear report helps your neighborhood respond.',
+      'Add a clear photo of the incident. Only take a photo when it’s safe.',
+      'Confirm the location and check your details before sending.',
+    ];
+    final contents = <Widget>[
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _title,
+            maxLength: 120,
+            decoration: const InputDecoration(
+              labelText: 'What happened? *',
+              hintText: 'e.g. Broken streetlight on Park Road',
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _description,
+            maxLines: 4,
+            maxLength: 500,
+            decoration: const InputDecoration(
+              labelText: 'Add a few details *',
+              hintText: 'What did you notice? How does it affect the area?',
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _address,
+            decoration: const InputDecoration(
+              labelText: 'Landmark or address (optional)',
+              prefixIcon: Icon(Icons.location_on_outlined),
+            ),
+          ),
+          if (_detailsError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(_detailsError!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ),
+        ],
+      ),
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_photoBytes == null) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
+              decoration: BoxDecoration(
+                  color: CwColors.mint.withValues(alpha: .5),
+                  borderRadius: BorderRadius.circular(24)),
+              child: Column(children: [
+                Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: const BoxDecoration(
+                        color: CwColors.paper, shape: BoxShape.circle),
+                    child: const Icon(Icons.add_a_photo_outlined,
+                        size: 34, color: CwColors.pine)),
+                const SizedBox(height: 20),
+                Text('Show what you see',
+                    style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                const Text('JPG or PNG · Up to 8 MB',
+                    style: TextStyle(color: CwColors.muted, fontSize: 12)),
+              ]),
+            ),
+            const SizedBox(height: 18),
+          ],
+          Row(
             children: [
-              FilledButton(
-                onPressed: _submitting ? null : details.onStepContinue,
-                child: Text(_step == 2
-                    ? (_submitting ? 'Sending…' : 'Send report')
-                    : 'Continue'),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed:
+                      kIsWeb ? null : () => _pickPhoto(ImageSource.camera),
+                  icon: const Icon(Icons.camera_alt_outlined),
+                  label: const Text('Camera'),
+                ),
               ),
               const SizedBox(width: 8),
-              if (_step > 0)
-                TextButton(
-                  onPressed:
-                      _submitting ? null : details.onStepCancel,
-                  child: const Text('Back'),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _pickPhoto(ImageSource.gallery),
+                  icon: const Icon(Icons.photo_outlined),
+                  label: const Text('Gallery'),
                 ),
+              ),
             ],
           ),
-        ),
-        steps: [
-          Step(
-            title: const Text('Details'),
-            subtitle: const Text('What happened'),
-            isActive: _step >= 0,
-            state: _step > 0 ? StepState.complete : StepState.indexed,
-            content: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  controller: _title,
-                  maxLength: 120,
-                  decoration: const InputDecoration(
-                    labelText: 'Title *',
-                    hintText: 'e.g. Pothole flooding the lane',
-                    border: OutlineInputBorder(),
+          if (_photoBytes != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(22),
+                    child: Image.memory(_photoBytes!,
+                        height: 230, width: double.infinity, fit: BoxFit.cover),
                   ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _description,
-                  maxLines: 4,
-                  maxLength: 500,
-                  decoration: const InputDecoration(
-                    labelText: 'Description *',
-                    hintText: 'What, where, how bad — 1-2 lines',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _address,
-                  decoration: const InputDecoration(
-                    labelText: 'Address (optional)',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                if (_detailsError != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(_detailsError!,
-                        style: TextStyle(
-                            color:
-                                Theme.of(context).colorScheme.error)),
-                  ),
-              ],
-            ),
-          ),
-          Step(
-            title: const Text('Photo'),
-            subtitle: const Text('Required, jpg/png under 8MB'),
-            isActive: _step >= 1,
-            state: _step > 1 ? StepState.complete : StepState.indexed,
-            content: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: kIsWeb
-                            ? null
-                            : () => _pickPhoto(ImageSource.camera),
-                        icon: const Icon(Icons.camera_alt_outlined),
-                        label: const Text('Camera'),
+                  Row(
+                    children: [
+                      Expanded(child: Text(_photoName)),
+                      TextButton(
+                        onPressed: () => setState(() {
+                          _photoBytes = null;
+                          _photoName = '';
+                        }),
+                        child: const Text('Remove'),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        onPressed: () =>
-                            _pickPhoto(ImageSource.gallery),
-                        icon: const Icon(Icons.photo_outlined),
-                        label: const Text('Gallery'),
-                      ),
-                    ),
-                  ],
-                ),
-                if (_photoBytes != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.memory(_photoBytes!,
-                              height: 180,
-                              width: double.infinity,
-                              fit: BoxFit.cover),
-                        ),
-                        Row(
-                          children: [
-                            Expanded(child: Text(_photoName)),
-                            TextButton(
-                              onPressed: () => setState(() {
-                                _photoBytes = null;
-                                _photoName = '';
-                              }),
-                              child: const Text('Remove'),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                    ],
                   ),
-                if (_photoError != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(_photoError!,
-                        style: TextStyle(
-                            color:
-                                Theme.of(context).colorScheme.error)),
-                  ),
-              ],
+                ],
+              ),
             ),
-          ),
-          Step(
-            title: const Text('Location & review'),
-            subtitle: const Text('GPS, then send'),
-            isActive: _step >= 2,
-            content: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _locating ? null : _useGps,
-                  icon: _locating
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child:
-                              CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.my_location),
-                  label: Text(_lat == null
-                      ? 'Use GPS *'
-                      : 'GPS: ${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}${_accuracy != null && _accuracy! > 0 ? ' (±${_accuracy!.toStringAsFixed(0)}m)' : ''}'),
-                ),
-                if (_gpsError != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(_gpsError!,
-                        style: TextStyle(
-                            color:
-                                Theme.of(context).colorScheme.error)),
-                  ),
-                const SizedBox(height: 12),
-                _reviewRow('Title', _title.text.trim()),
-                _reviewRow('Details', _description.text.trim()),
-                _reviewRow('Photo', _photoBytes == null
-                    ? 'Missing — go back one step'
-                    : _photoName),
-                _reviewRow('Spot', _lat == null
-                    ? 'Missing — tap Use GPS'
-                    : '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}'),
-              ],
+          if (_photoError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(_photoError!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error)),
             ),
+        ],
+      ),
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          OutlinedButton.icon(
+            onPressed: _locating ? null : _useGps,
+            icon: _locating
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.my_location),
+            label: Text(_lat == null
+                ? 'Use GPS *'
+                : 'GPS: ${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}${_accuracy != null && _accuracy! > 0 ? ' (±${_accuracy!.toStringAsFixed(0)}m)' : ''}'),
           ),
+          if (_gpsError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(_gpsError!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            ),
+          const SizedBox(height: 12),
+          _reviewRow('Title', _title.text.trim()),
+          _reviewRow('Details', _description.text.trim()),
+          _reviewRow('Photo',
+              _photoBytes == null ? 'Missing — go back one step' : _photoName),
+          _reviewRow(
+              'Spot',
+              _lat == null
+                  ? 'Missing — tap Use GPS'
+                  : '${_lat!.toStringAsFixed(5)}, ${_lng!.toStringAsFixed(5)}'),
+        ],
+      )
+    ];
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('New report'),
+        actions: const [
+          Padding(
+              padding: EdgeInsets.only(right: 22),
+              child: Row(children: [
+                Icon(Icons.edit_note_rounded, size: 18, color: CwColors.muted),
+                SizedBox(width: 5),
+                Text('Draft',
+                    style: TextStyle(fontSize: 12, color: CwColors.muted)),
+              ]))
+        ],
+      ),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
+        children: [
+          Row(
+              children: List.generate(
+                  3,
+                  (i) => Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.only(right: i < 2 ? 10 : 0),
+                          child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                AnimatedContainer(
+                                  duration: const Duration(milliseconds: 220),
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                      color: i <= _step
+                                          ? CwColors.pine
+                                          : CwColors.sand,
+                                      borderRadius: BorderRadius.circular(4)),
+                                ),
+                                const SizedBox(height: 10),
+                                Text(
+                                    [
+                                      '01  Details',
+                                      '02  Photo',
+                                      '03  Review'
+                                    ][i],
+                                    style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: i <= _step
+                                            ? CwColors.pine
+                                            : CwColors.muted)),
+                              ]),
+                        ),
+                      ))),
+          const SizedBox(height: 30),
+          CwPageIntro(
+              eyebrow: 'Step ${_step + 1} of 3',
+              title: titles[_step],
+              description: descriptions[_step]),
+          const SizedBox(height: 26),
+          AnimatedSize(
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 220),
+            alignment: Alignment.topCenter,
+            child: contents[_step],
+          ),
+          const SizedBox(height: 24),
+          FilledButton(
+            onPressed: _submitting ? null : _continue,
+            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+              if (_submitting) ...[
+                const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2)),
+                const SizedBox(width: 10),
+              ],
+              Text(_step == 2
+                  ? (_submitting ? 'Sending report…' : 'Send report')
+                  : 'Continue'),
+              if (!_submitting) ...[
+                const SizedBox(width: 10),
+                const Icon(Icons.arrow_forward_rounded, size: 18)
+              ],
+            ]),
+          ),
+          if (_step > 0) ...[
+            const SizedBox(height: 8),
+            TextButton(
+                onPressed:
+                    _submitting ? null : () => setState(() => _step -= 1),
+                child: const Text('Back to previous step')),
+          ],
+          const SizedBox(height: 20),
+          const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Icon(Icons.lock_outline_rounded, size: 16, color: CwColors.muted),
+            SizedBox(width: 8),
+            Expanded(
+                child: Text(
+                    'Your report is reviewed before it appears in the community feed.',
+                    style: TextStyle(
+                        fontSize: 12, color: CwColors.muted, height: 1.5))),
+          ]),
         ],
       ),
     );
@@ -462,8 +530,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
         children: [
           SizedBox(
               width: 64,
-              child: Text(k,
-                  style: Theme.of(context).textTheme.bodySmall)),
+              child: Text(k, style: Theme.of(context).textTheme.bodySmall)),
           Expanded(child: Text(v)),
         ],
       ),
@@ -473,8 +540,8 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
   void _continue() {
     if (_step == 0) {
       if (!_detailsOk) {
-        setState(() => _detailsError =
-            'Add a short title and a line of detail first.');
+        setState(() =>
+            _detailsError = 'Add a short title and a line of detail first.');
         return;
       }
       setState(() {
@@ -489,8 +556,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
       setState(() => _step = 2);
     } else {
       if (_lat == null || _lng == null) {
-        setState(() =>
-            _gpsError = 'Tap Use GPS so crews can find the spot.');
+        setState(() => _gpsError = 'Tap Use GPS so crews can find the spot.');
         return;
       }
       _submit();
@@ -509,12 +575,12 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
               Icon(Icons.check_circle_outline,
                   size: 64, color: Colors.green.shade700),
               const SizedBox(height: 12),
-              const Text('Report sent!',
-                  style: TextStyle(
-                      fontSize: 20, fontWeight: FontWeight.bold)),
+              const NeighborhoodArt(),
+              const Text('Thanks for looking out.',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               Text(
-                'AI triage is checking it now (status: ${_sentStatus ?? 'processing'}). It appears in the feed once verified.',
+                'Your report is ${_sentStatus ?? 'processing'}. Once verified, it will appear in the neighborhood feed.',
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
