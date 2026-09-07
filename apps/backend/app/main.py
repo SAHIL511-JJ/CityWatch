@@ -31,6 +31,10 @@ from .config import settings
 from .db import Base, SessionLocal, engine, get_db
 from .models import Category, Incident, IncidentNote, Staff, StatusHistory, User
 from .storage import get_storage
+from .taxonomy import (
+    canonical_category,
+    normalize_analysis,
+)
 
 app = FastAPI(title=settings.APP_NAME)
 
@@ -100,6 +104,7 @@ def haversine_km(lat1, lng1, lat2, lng2) -> float:
 
 
 def incident_out(i: Incident) -> dict:
+    analysis = normalize_analysis(i.ai_analysis)
     return {
         "id": str(i.id),
         "title": i.title,
@@ -111,7 +116,7 @@ def incident_out(i: Incident) -> dict:
         "status": i.status,
         "severity": i.severity,
         "ai_confidence": i.ai_confidence,
-        "ai_analysis": i.ai_analysis,
+        "ai_analysis": analysis,
         "reporter_id": str(i.reporter_id) if i.reporter_id else None,
         "assigned_to": str(i.assigned_to) if i.assigned_to else None,
         "created_at": i.created_at.isoformat() if i.created_at else None,
@@ -144,14 +149,19 @@ def seed() -> None:
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        if db.query(Category).count() == 0:
-            for name, icon in [
-                ("crime", "shield"),
-                ("fire", "flame"),
-                ("accident", "car"),
-                ("hazard", "alert"),
-                ("other", "dot"),
-            ]:
+        existing_categories = {c.name for c in db.query(Category).all()}
+        for name, icon in [
+            ("flooding", "water_drop"),
+            ("waterlogging", "waves"),
+            ("blocked_drain", "plumbing"),
+            ("waste", "delete_sweep"),
+            ("sewage", "sanitizer"),
+            ("plastic", "recycling"),
+            ("pollution", "air"),
+            ("damaged_infrastructure", "construction"),
+            ("other_environmental_condition", "eco"),
+        ]:
+            if name not in existing_categories:
                 db.add(Category(name=name, icon=icon))
         if db.query(Staff).count() == 0:
             db.add(
@@ -313,7 +323,7 @@ def create_incident(
         except Exception:
             result = {
                 "is_legitimate": True,
-                "category": "other",
+                "category": "other_environmental_condition",
                 "severity": "medium",
                 "confidence": 0.0,
                 "reason": "AI analysis unavailable; manual review required",
@@ -336,13 +346,12 @@ def list_incidents(
     q = db.query(Incident).filter(Incident.status == "verified")
     if severity:
         q = q.filter(Incident.severity == severity)
-    # NOTE: category lives inside ai_analysis JSON for MVP; filter in Python below.
+    # Category lives inside ai_analysis for the portable MVP; normalize legacy
+    # values while filtering so historical records remain discoverable.
     rows = q.order_by(Incident.created_at.desc()).limit(500).all()
     out = []
     for i in rows:
-        if category and (
-            not i.ai_analysis or i.ai_analysis.get("category") != category
-        ):
+        if category and canonical_category((i.ai_analysis or {}).get("category")) != canonical_category(category):
             continue
         if lat is not None and lng is not None:
             if haversine_km(lat, lng, i.lat, i.lng) > radius_km:
@@ -929,7 +938,10 @@ def analytics(staff: Staff = Depends(get_current_staff), db: Session = Depends(g
         by_sev[str(k)] = int(v)
     by_cat: dict[str, int] = {}
     for (a,) in db.query(Incident.ai_analysis).all():
-        c = (a or {}).get("category", "unknown")
+        raw_category = (a or {}).get("category") if isinstance(a, dict) else None
+        if not raw_category:
+            continue
+        c = canonical_category(raw_category)
         by_cat[c] = by_cat.get(c, 0) + 1
     by_day_raw = (
         db.query(func.date(Incident.created_at), func.count())
@@ -980,6 +992,30 @@ def analytics(staff: Staff = Depends(get_current_staff), db: Session = Depends(g
         "by_severity": [{"severity": k, "count": v} for k, v in sorted(by_sev.items())],
         "by_day": [per_day[k] for k in sorted(per_day)],
     }
+
+
+@app.get("/admin/analytics/hotspots")
+def admin_hotspots(
+    radius_km: float = Query(0.75, ge=0.05, le=25),
+    window_days: int = Query(30, ge=1, le=365),
+    limit: int = Query(50, ge=1, le=100),
+    lat: float | None = Query(None, ge=-90, le=90),
+    lng: float | None = Query(None, ge=-180, le=180),
+    staff: Staff = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+):
+    """Rank recurring environmental signals without a permanent hotspot table."""
+
+    from .hotspots import detect_hotspots
+
+    return detect_hotspots(
+        db,
+        radius_km=radius_km,
+        window_days=window_days,
+        limit=limit,
+        center_lat=lat,
+        center_lng=lng,
+    )
 
 
 @app.get("/health")
