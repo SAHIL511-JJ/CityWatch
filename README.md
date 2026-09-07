@@ -1,6 +1,6 @@
 # CityWatch — citizen incident reporting
 
-Snap a photo, report crime / hazards / city issues, browse verified reports on a map. AI checks every report, ops team reviews in the CRM.
+Snap a photo, report an environmental observation, and browse verified neighbourhood signals. AI checks every report, ops teams review the evidence in the CRM, and recurring observations become explainable hotspots.
 
 - **App (Flutter)** `apps/mobile` — report with photo + GPS, map/list feed, code verification, alert settings
 - **API (FastAPI)** `apps/backend` — custom JWT auth (anonymous device ID + phone/email code), incident CRUD, photo upload, Celery AI worker, nearby push
@@ -21,7 +21,7 @@ uploads; without it photos save to backend `./uploads`).
 cd apps/backend
 cp .env.example .env   # fill SUPABASE_*, JWT_SECRET, REDIS_URL, GEMINI_API_KEY
 pip install -r requirements.txt
-uvicorn app.main:app --reload              # API on :8000
+uvicorn app.main:app                       # API on :8000 (run one process; do not use --reload)
 celery -A app.worker.celery worker --loglevel=info   # AI worker
 ```
 Env: `SUPABASE_URL, SUPABASE_SERVICE_KEY, SUPABASE_DB_URL_POOLER, SUPABASE_DB_URL_DIRECT, JWT_SECRET, REDIS_URL, GEMINI_API_KEY, GEMINI_MODEL=gemini-3.6-flash, FCM_CRED_JSON, STORAGE_BUCKET`. Without keys it runs on sqlite + local `./uploads` + fake AI stub.
@@ -42,10 +42,14 @@ flutter pub get && flutter analyze
 Point `lib/config.dart` baseUrl at your API. Auth token stored in secure storage.
 
 ## AI (direct Google Gemini, free tier)
-Get a key at `aistudio.google.com` → Get API key (no card). Set `GEMINI_API_KEY` + `GEMINI_MODEL=gemini-3.6-flash`. Worker sends text + photo, expects `{is_legitimate, category, severity, confidence, reason}` → sets `verified / rejected / needs_review`. No key = keyword stub so nothing breaks.
+Get a key at `aistudio.google.com` → Get API key (no card). Set `GEMINI_API_KEY` + `GEMINI_MODEL=gemini-3.6-flash`. Worker sends the photo as primary evidence and text as supporting context, and expects `{is_legitimate, category, severity, confidence, reason, analysis_version}` → sets `verified / rejected / needs_review`. No key = deterministic environmental keyword stub so nothing breaks.
+
+## Environmental taxonomy
+
+All API, CRM, and Flutter filters use the same machine values: `flooding`, `waterlogging`, `blocked_drain`, `waste`, `sewage`, `plastic`, `pollution`, `damaged_infrastructure`, and `other_environmental_condition`. Historical generic values remain readable and are mapped to the last category when returned.
 
 ## API cheatsheet
-`POST /auth/anonymous, POST /auth/send-code, POST /auth/verify, POST /incidents (multipart), GET /incidents?lat&lng&radius_km, GET /incidents/{id}, POST /admin/login, GET/PATCH /admin/incidents, POST /admin/incidents/{id}/notes, GET /admin/users, GET /admin/analytics/summary`
+`POST /auth/anonymous, POST /auth/send-code, POST /auth/verify, POST /incidents (multipart), GET /incidents?lat&lng&radius_km&category, GET /incidents/{id}, POST /admin/login, GET/PATCH /admin/incidents, POST /admin/incidents/{id}/notes, GET /admin/users, GET /admin/analytics/summary, GET /admin/analytics/hotspots`
 
 ## Docs
 - `incident_reporting_platform_plan.md` — full product + tech plan

@@ -12,17 +12,22 @@ import os
 from celery import Celery
 
 from .config import settings
+from .taxonomy import ENVIRONMENTAL_CATEGORIES, canonical_category
 
 celery = Celery(
     "incident_worker", broker=settings.REDIS_URL, backend=settings.REDIS_URL
 )
 celery.conf.update(task_acks_late=True, worker_prefetch_multiplier=1)
 
-GEMINI_PROMPT = """You check citizen incident reports. Reply with JSON only, no other text.
-Fields: {"is_legitimate": bool, "category": "crime|fire|accident|hazard|other", "severity": "low|medium|high|critical", "confidence": 0-1, "reason": "short reason"}.
-Legitimate = real visible event (crime, fire, crash, flood, broken road, fallen wire). Reject spam, jokes, blurry random photos, screenshots, memes.
-Severity: low = small litter/pothole, medium = hazard needing crew, high = fire/crash/crime in progress, critical = lives at risk.
-Use the photo as main proof; text as extra hint. Low confidence (<0.7) when unsure."""
+ANALYSIS_VERSION = "environmental-v1"
+_CATEGORY_KEYS = "|".join(ENVIRONMENTAL_CATEGORIES)
+
+GEMINI_PROMPT = f"""You triage citizen environmental observations for CityWatch. Reply with JSON only, no markdown.
+Fields: {{"is_legitimate": bool, "category": "{_CATEGORY_KEYS}", "severity": "low|medium|high|critical", "confidence": 0-1, "reason": "short plain-language reason", "analysis_version": "{ANALYSIS_VERSION}"}}.
+Use the photo as the primary evidence and the report text as supporting context. Reject spam, jokes, screenshots, memes, or unrelated content.
+Choose exactly one environmental category: flooding, waterlogging, blocked_drain, waste, sewage, plastic, pollution, damaged_infrastructure, or other_environmental_condition.
+Severity: low = local nuisance, medium = needs a crew, high = likely to spread or disrupt access, critical = immediate safety or public-health risk.
+Keep the reason concise and explain the visible evidence. Set confidence below 0.7 when the evidence is unclear."""
 
 
 def _load_photo_bytes(photo_url: str | None) -> tuple[bytes | None, str]:
@@ -51,6 +56,50 @@ def _load_photo_bytes(photo_url: str | None) -> tuple[bytes | None, str]:
     except Exception as e:
         print(f"[gemini] photo load failed: {e}")
     return None, "image/jpeg"
+
+
+def _coerce_confidence(value: object) -> float:
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _safe_bool(value: object, default: bool = True) -> bool:
+    if isinstance(value, bool):
+        return value
+    return default
+
+
+def sanitize_ai_result(value: object) -> dict:
+    """Make provider output safe and keep uncertain observations reviewable."""
+
+    raw = dict(value) if isinstance(value, dict) else {}
+    raw_category = raw.get("category")
+    category = canonical_category(raw_category)
+    confidence = _coerce_confidence(raw.get("confidence"))
+    severity = str(raw.get("severity", "medium")).lower()
+    if severity not in ("low", "medium", "high", "critical"):
+        severity = "medium"
+        confidence = 0.0
+    if raw_category is None or str(raw_category).strip().lower() not in ENVIRONMENTAL_CATEGORIES:
+        # A legacy/unknown category may still be useful, but it cannot be
+        # auto-approved until a person confirms the environmental interpretation.
+        confidence = min(confidence, 0.49)
+    reason = str(raw.get("reason") or "Evidence needs a human review.").strip()[:300]
+    if not isinstance(raw.get("is_legitimate"), bool):
+        confidence = min(confidence, 0.49)
+    result = {
+        "is_legitimate": _safe_bool(raw.get("is_legitimate"), default=True),
+        "category": category,
+        "severity": severity,
+        "confidence": confidence,
+        "reason": reason,
+        "analysis_version": str(raw.get("analysis_version") or ANALYSIS_VERSION),
+    }
+    if raw_category is not None and str(raw_category).lower() != category:
+        result["legacy_category"] = str(raw_category)[:80]
+    return result
 
 
 def gemini_ai(title: str, description: str, photo_url: str | None) -> dict:
@@ -91,20 +140,7 @@ def gemini_ai(title: str, description: str, photo_url: str | None) -> dict:
         text = text.strip("`").split("\n", 1)[-1].rsplit("```", 1)[0].strip()
         if text.lower().startswith("json"):
             text = text[4:].strip()
-    res = json.loads(text)
-    cat = str(res.get("category", "other")).lower()
-    sev = str(res.get("severity", "low")).lower()
-    if cat not in ("crime", "fire", "accident", "hazard", "other"):
-        cat = "other"
-    if sev not in ("low", "medium", "high", "critical"):
-        sev = "low"
-    return {
-        "is_legitimate": bool(res.get("is_legitimate", False)),
-        "category": cat,
-        "severity": sev,
-        "confidence": max(0.0, min(1.0, float(res.get("confidence", 0.5)))),
-        "reason": str(res.get("reason", ""))[:300],
-    }
+    return sanitize_ai_result(json.loads(text))
 
 
 def run_ai(title: str, description: str, photo_url: str | None) -> dict:
@@ -118,26 +154,41 @@ def run_ai(title: str, description: str, photo_url: str | None) -> dict:
 
 
 def fake_ai(title: str, description: str, photo_url: str | None) -> dict:
-    """Stub returning {is_legitimate, category, severity, confidence}."""
+    """Deterministic environmental fallback used for local demos and outages."""
     text = f"{title} {description}".lower()
     if any(w in text for w in ("spam", "test", "asdf", "fake")):
-        return {
+        return sanitize_ai_result({
             "is_legitimate": False,
-            "category": "other",
+            "category": "other_environmental_condition",
             "severity": "low",
             "confidence": 0.92,
-        }
-    if any(w in text for w in ("fire", "burn", "smoke")):
-        cat, sev, conf = "fire", "high", 0.85
-    elif any(w in text for w in ("crash", "accident", "collision")):
-        cat, sev, conf = "accident", "high", 0.82
-    elif any(w in text for w in ("crime", "robbery", "theft", "attack", "gun")):
-        cat, sev, conf = "crime", "critical", 0.8
-    elif any(w in text for w in ("flood", "hazard", "pothole", "wire", "leak")):
-        cat, sev, conf = "hazard", "medium", 0.75
+            "reason": "The submission matches a known spam or test pattern.",
+        })
+    if any(w in text for w in ("flood", "flooding", "river overflow")):
+        cat, sev, conf, reason = "flooding", "high", 0.92, "Visible flooding can restrict movement and spread quickly."
+    elif any(w in text for w in ("waterlogged", "waterlogging", "water logging", "standing water")):
+        cat, sev, conf, reason = "waterlogging", "high", 0.88, "Standing water is accumulating on a public route."
+    elif any(w in text for w in ("blocked drain", "clogged drain", "drain blocked", "gutter")):
+        cat, sev, conf, reason = "blocked_drain", "high", 0.87, "A blocked drain can cause repeat flooding during rainfall."
+    elif any(w in text for w in ("sewage", "sewer", "wastewater")):
+        cat, sev, conf, reason = "sewage", "high", 0.89, "The report describes a sanitation or wastewater issue."
+    elif any(w in text for w in ("plastic", "plastic waste")):
+        cat, sev, conf, reason = "plastic", "medium", 0.84, "Plastic litter is visible in a shared public area."
+    elif any(w in text for w in ("garbage", "rubbish", "trash", "waste", "dumping", "litter")):
+        cat, sev, conf, reason = "waste", "medium", 0.84, "Accumulated waste is affecting a shared public area."
+    elif any(w in text for w in ("pollution", "smoke", "air quality", "burning")):
+        cat, sev, conf, reason = "pollution", "high", 0.82, "The report points to a possible public-health pollution risk."
+    elif any(w in text for w in ("pothole", "broken road", "damaged road", "collapsed", "broken footpath", "streetlight")):
+        cat, sev, conf, reason = "damaged_infrastructure", "medium", 0.80, "Damaged public infrastructure needs inspection and repair."
     else:
-        cat, sev, conf = "other", "low", 0.45  # low confidence -> needs_review
-    return {"is_legitimate": True, "category": cat, "severity": sev, "confidence": conf}
+        cat, sev, conf, reason = "other_environmental_condition", "low", 0.45, "The report may be environmental, but the evidence is unclear."
+    return sanitize_ai_result({
+        "is_legitimate": True,
+        "category": cat,
+        "severity": sev,
+        "confidence": conf,
+        "reason": reason,
+    })
 
 
 def send_fcm_stub(tokens: list[str], title: str, body: str) -> None:
@@ -163,6 +214,7 @@ def apply_ai_result(db, inc, res: dict, changed_by=None) -> str:
     """Shared status update used by Celery task and sync admin endpoint."""
     from .models import StatusHistory, User
 
+    res = sanitize_ai_result(res)
     conf = float(res["confidence"])
     old = inc.status
     if not res["is_legitimate"]:

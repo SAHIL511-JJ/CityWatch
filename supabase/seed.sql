@@ -2,9 +2,13 @@
 -- Supabase Dashboard > SQL Editor > paste + Run.
 
 INSERT INTO categories (name, icon) VALUES
-  ('crime', 'shield-alert'),
-  ('fire', 'flame'),
-  ('accident', 'car-crash'),
-  ('hazard', 'alert-triangle'),
-  ('other', 'dots')
+  ('flooding', 'water-drop'),
+  ('waterlogging', 'waves'),
+  ('blocked_drain', 'plumbing'),
+  ('waste', 'delete-sweep'),
+  ('sewage', 'sanitizer'),
+  ('plastic', 'recycling'),
+  ('pollution', 'air'),
+  ('damaged_infrastructure', 'construction'),
+  ('other_environmental_condition', 'eco')
 ON CONFLICT (name) DO NOTHING;
