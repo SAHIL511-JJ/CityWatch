@@ -37,18 +37,16 @@ class Settings(BaseSettings):
     # CORS for browser callers (CRM on :3000). Comma-separated extra origins.
     CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 
-    # S3-style swap (future R2 move = change these only, see storage.py)
-    S3_ENDPOINT: str = ""
-    S3_BUCKET: str = ""
-    S3_KEY: str = ""
-    S3_SECRET: str = ""
-
     @property
     def DATABASE_URL(self) -> str:
-        # Runtime uses the pooler URL; fall back to sqlite for local boot/test.
-        if self.SUPABASE_DB_URL_POOLER:
-            return self.SUPABASE_DB_URL_POOLER
-        return "sqlite:///./dev.db"
+        # CityWatch always runs against Supabase Postgres. Missing
+        # configuration must fail at startup instead of creating a divergent
+        # local database.
+        if not self.SUPABASE_DB_URL_POOLER:
+            raise RuntimeError("SUPABASE_DB_URL_POOLER is required; SQLite is not supported")
+        if not self.SUPABASE_DB_URL_POOLER.startswith(("postgresql://", "postgresql+psycopg2://")):
+            raise RuntimeError("SUPABASE_DB_URL_POOLER must be a PostgreSQL connection URL")
+        return self.SUPABASE_DB_URL_POOLER
 
 
 @lru_cache

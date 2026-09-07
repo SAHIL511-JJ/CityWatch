@@ -35,7 +35,7 @@ Files: `apps/backend/requirements.txt`, `app/main.py`, `app/config.py`, `app/db.
 - Upload: validate jpg/png <8MB -> Supabase Storage `incident-photos/{id}.jpg` via service key -> save photo_url.
 - Worker: Celery + Redis. Fake AI stub now (`is_legitimate, category, severity, confidence`) with TODO to plug vision LLM. Update status verified/rejected/needs_review. Nearby query for FCM stub.
 - Env: SUPABASE_URL, SUPABASE_SERVICE_KEY, SUPABASE_DB_URL_POOLER, SUPABASE_DB_URL_DIRECT, JWT_SECRET, REDIS_URL, FCM_CRED_JSON, AI_API_KEY.
-- Acceptance: `uvicorn` boots, `POST /auth/anonymous` + `POST /incidents` + `GET /incidents` work against Supabase (or sqlite fallback for test).
+- Acceptance: `uvicorn` boots, `POST /auth/anonymous` + `POST /incidents` + `GET /incidents` work against Supabase Postgres/PostGIS and Supabase Storage.
 
 ## WT3 — CRM (Vercel)
 Files: `apps/crm/` Next.js + Tailwind/shadcn, TanStack Query, react-leaflet, Recharts.

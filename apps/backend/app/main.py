@@ -1,5 +1,4 @@
 import math
-import os
 from datetime import datetime
 
 from fastapi import (
@@ -13,7 +12,6 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -28,7 +26,7 @@ from .auth import (
     store_code,
 )
 from .config import settings
-from .db import Base, SessionLocal, engine, get_db
+from .db import SessionLocal, get_db
 from .models import Category, Incident, IncidentNote, Staff, StatusHistory, User
 from .storage import get_storage
 from .taxonomy import (
@@ -146,7 +144,8 @@ def enqueue_analysis(incident_id: str) -> bool:
 
 
 def seed() -> None:
-    Base.metadata.create_all(bind=engine)
+    # Supabase migrations own schema creation. Startup only seeds idempotent
+    # application data after the managed schema is present.
     db = SessionLocal()
     try:
         existing_categories = {c.name for c in db.query(Category).all()}
@@ -281,14 +280,9 @@ def create_incident(
         address=address,
         status="processing",
     )
-    try:
-        # PostGIS WKT on postgres; NULL on sqlite (lat/lng remain canonical)
-        if not engine.url.get_backend_name().startswith("sqlite"):
-            from geoalchemy2.elements import WKTElement
+    from geoalchemy2.elements import WKTElement
 
-            inc.location = WKTElement(f"POINT({lng} {lat})", srid=4326)  # type: ignore
-    except Exception:
-        pass
+    inc.location = WKTElement(f"POINT({lng} {lat})", srid=4326)  # type: ignore
     db.add(inc)
     db.commit()
     db.refresh(inc)
@@ -346,7 +340,7 @@ def list_incidents(
     q = db.query(Incident).filter(Incident.status == "verified")
     if severity:
         q = q.filter(Incident.severity == severity)
-    # Category lives inside ai_analysis for the portable MVP; normalize legacy
+    # Category lives inside ai_analysis for the Supabase-backed MVP; normalize legacy
     # values while filtering so historical records remain discoverable.
     rows = q.order_by(Incident.created_at.desc()).limit(500).all()
     out = []
@@ -375,7 +369,7 @@ def get_incident(incident_id: str, db: Session = Depends(get_db)):
 @app.get("/incidents/{incident_id}/photo")
 def public_photo(incident_id: str, db: Session = Depends(get_db)):
     """Public reels-feed photo. Verified incidents only, no auth."""
-    from fastapi.responses import FileResponse, RedirectResponse
+    from fastapi.responses import RedirectResponse
 
     i = db.get(Incident, incident_id)
     if i is None or not i.photo_url or i.status != "verified":
@@ -386,11 +380,7 @@ def public_photo(incident_id: str, db: Session = Depends(get_db)):
             raise HTTPException(404, "photo unavailable")
         url = get_storage().signed_url(key.split("/", 1)[1])
         return RedirectResponse(url, status_code=302)
-    p = key[2:] if key.startswith("./") else key.lstrip("/")
-    if not os.path.exists(p):
-        raise HTTPException(404, "photo file missing")
-    media = "image/png" if p.lower().endswith(".png") else "image/jpeg"
-    return FileResponse(p, media_type=media)
+    raise HTTPException(404, "photo unavailable")
 
 
 # ---------- admin ----------
@@ -892,7 +882,7 @@ def admin_photo(
 ):
     """Serve incident photo. <img> tags can't send headers, so staff JWT
     is accepted as ?token= query param (falls back to Bearer header)."""
-    from fastapi.responses import FileResponse, RedirectResponse
+    from fastapi.responses import RedirectResponse
 
     raw = token
     if not raw and request is not None:
@@ -919,11 +909,7 @@ def admin_photo(
             raise HTTPException(404, "photo unavailable")
         url = get_storage().signed_url(key.split("/", 1)[1])
         return RedirectResponse(url, status_code=302)
-    p = key[2:] if key.startswith("./") else key.lstrip("/")
-    if not os.path.exists(p):
-        raise HTTPException(404, "photo file missing")
-    media = "image/png" if p.lower().endswith(".png") else "image/jpeg"
-    return FileResponse(p, media_type=media)
+    raise HTTPException(404, "photo unavailable")
 
 
 @app.get("/admin/analytics/summary")
@@ -1021,9 +1007,3 @@ def admin_hotspots(
 @app.get("/health")
 def health():
     return {"ok": True}
-
-
-try:
-    app.mount("/uploads", StaticFiles(directory="./uploads"), name="uploads")
-except Exception:
-    pass

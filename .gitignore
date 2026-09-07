@@ -13,8 +13,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
-dev.db
-uploads/
 t.jpg
 
 # Node / Next.js CRM

@@ -1,10 +1,4 @@
-"""Tables mirror WT1 contract (supabase/migrations/001_init.sql).
-
-String(36) PKs hold UUIDs so the same models run on Postgres+PostGIS
-and on sqlite (local boot / acceptance test). `location` is real
-Geography(Point,4326) on Postgres; stays NULL on sqlite (lat/lng are
-the portable columns, PostGIS is only an accelerator).
-"""
+"""Tables mirror the Supabase Postgres/PostGIS contract."""
 
 import uuid
 from datetime import datetime
@@ -12,21 +6,8 @@ from datetime import datetime
 from geoalchemy2 import Geography
 from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.types import TypeDecorator
 
 from .db import Base
-
-
-class LocationType(TypeDecorator):
-    """Geography(Point,4326) on Postgres, plain TEXT on sqlite (local boot/test)."""
-
-    impl = Text
-    cache_ok = True
-
-    def load_dialect_impl(self, dialect):
-        if dialect.name == "postgresql":
-            return Geography("POINT", srid=4326)
-        return Text()
 
 
 def _uid() -> str:
@@ -75,7 +56,9 @@ class Incident(Base):
     title: Mapped[str] = mapped_column(Text)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     photo_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    location: Mapped[str | None] = mapped_column(LocationType(), nullable=True)
+    location: Mapped[str | None] = mapped_column(
+        Geography("POINT", srid=4326), nullable=True
+    )
     lat: Mapped[float] = mapped_column(Float)
     lng: Mapped[float] = mapped_column(Float)
     address: Mapped[str | None] = mapped_column(Text, nullable=True)

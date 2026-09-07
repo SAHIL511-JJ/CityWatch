@@ -34,25 +34,19 @@ def _load_photo_bytes(photo_url: str | None) -> tuple[bytes | None, str]:
     if not photo_url:
         return None, "image/jpeg"
     try:
-        if photo_url.startswith("http"):
-            import httpx
+        import httpx
 
-            r = httpx.get(photo_url, timeout=10)
+        remote_url = photo_url
+        if photo_url.startswith(f"{settings.STORAGE_BUCKET}/"):
+            from .storage import get_storage
+
+            remote_url = get_storage().signed_url(photo_url.split("/", 1)[1])
+        if remote_url.startswith("http"):
+            r = httpx.get(remote_url, timeout=10)
             if r.status_code != 200:
                 return None, "image/jpeg"
             mime = r.headers.get("content-type", "image/jpeg").split(";")[0]
             return r.content, mime or "image/jpeg"
-        p = photo_url
-        for prefix in ("./uploads/", "uploads/", "./"):
-            if p.startswith(prefix):
-                break
-        else:
-            p = os.path.join(".", photo_url.lstrip("/"))
-        if os.path.exists(p) and os.path.isfile(p):
-            with open(p, "rb") as f:
-                data = f.read()
-            mime = "image/png" if p.lower().endswith(".png") else "image/jpeg"
-            return data, mime
     except Exception as e:
         print(f"[gemini] photo load failed: {e}")
     return None, "image/jpeg"

@@ -13,8 +13,8 @@ Snap a photo, report an environmental observation, and browse verified neighbour
 Repo is linked in the Supabase dashboard (repo connect), so pushing
 `supabase/migrations/*.sql` auto-applies to the DB. Manual fallback:
 SQL Editor → run `supabase/migrations/*.sql` in order, then `supabase/seed.sql`.
-Storage → private bucket `incident-photos` (needs service key for real
-uploads; without it photos save to backend `./uploads`).
+Storage → private bucket `incident-photos` (the backend service key is required;
+there is no local upload fallback).
 
 ### 2. Backend
 ```bash
@@ -24,7 +24,7 @@ pip install -r requirements.txt
 uvicorn app.main:app                       # API on :8000 (run one process; do not use --reload)
 celery -A app.worker.celery worker --loglevel=info   # AI worker
 ```
-Env: `SUPABASE_URL, SUPABASE_SERVICE_KEY, SUPABASE_DB_URL_POOLER, SUPABASE_DB_URL_DIRECT, JWT_SECRET, REDIS_URL, GEMINI_API_KEY, GEMINI_MODEL=gemini-3.6-flash, FCM_CRED_JSON, STORAGE_BUCKET`. Without keys it runs on sqlite + local `./uploads` + fake AI stub.
+Env: `SUPABASE_URL, SUPABASE_SERVICE_KEY, SUPABASE_DB_URL_POOLER, SUPABASE_DB_URL_DIRECT, JWT_SECRET, REDIS_URL, GEMINI_API_KEY, GEMINI_MODEL=gemini-3.6-flash, FCM_CRED_JSON, STORAGE_BUCKET`. Supabase Postgres/PostGIS and Supabase Storage are required; only the AI worker has a deterministic stub fallback when Gemini is unavailable.
 
 ### 3. CRM
 ```bash

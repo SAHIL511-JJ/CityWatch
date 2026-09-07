@@ -1,9 +1,9 @@
 """On-demand environmental hotspot clustering for the hackathon MVP.
 
 Hotspots are derived from verified incidents instead of introducing another
-database table.  The algorithm is intentionally deterministic and bounded for
-the expected dataset; PostGIS can narrow the candidate query when a map centre
-is supplied, while the same Python clustering works on SQLite/local tests.
+database table. The algorithm is intentionally deterministic and bounded for
+the expected dataset; PostGIS narrows the candidate query when a map centre is
+supplied.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ from sqlalchemy import cast
 from sqlalchemy.orm import Session
 from geoalchemy2 import Geography
 
-from .db import engine
 from .models import Incident
 from .taxonomy import canonical_category
 
@@ -70,34 +69,16 @@ def _candidate_rows(
         .order_by(Incident.created_at.asc(), Incident.id.asc())
         .limit(MAX_CANDIDATES)
     )
-    # When PostGIS is available and a map centre is supplied, use the indexed
-    # geography column to avoid pulling distant observations into the cluster.
-    # A failed/SQLite query falls back to the portable lat/lng filter below.
-    if (
-        center_lat is not None
-        and center_lng is not None
-        and radius_km is not None
-        and not engine.url.get_backend_name().startswith("sqlite")
-    ):
-        try:
-            from geoalchemy2.functions import ST_DWithin, ST_MakePoint, ST_SetSRID
-
-            point = cast(
-                ST_SetSRID(ST_MakePoint(center_lng, center_lat), 4326),
-                Geography("POINT", srid=4326),
-            )
-            q = q.filter(ST_DWithin(Incident.location, point, radius_km * 1000))
-            return q.all()
-        except Exception:
-            db.rollback()
-    rows = q.all()
+    # Use the indexed Supabase PostGIS geography column for map-centred reads.
     if center_lat is not None and center_lng is not None and radius_km is not None:
-        rows = [
-            row
-            for row in rows
-            if haversine_km(center_lat, center_lng, row.lat, row.lng) <= radius_km
-        ]
-    return rows
+        from geoalchemy2.functions import ST_DWithin, ST_MakePoint, ST_SetSRID
+
+        point = cast(
+            ST_SetSRID(ST_MakePoint(center_lng, center_lat), 4326),
+            Geography("POINT", srid=4326),
+        )
+        q = q.filter(ST_DWithin(Incident.location, point, radius_km * 1000))
+    return q.all()
 
 
 def _union_find_clusters(rows: list[Incident], radius_km: float, window_days: int) -> list[list[Incident]]:

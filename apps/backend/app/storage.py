@@ -1,10 +1,5 @@
-"""Photo upload helper: S3-style interface, Supabase backend today, R2 tomorrow.
+"""Photo upload helper backed exclusively by Supabase Storage."""
 
-Swap rule (per plan): changing to Cloudflare R2 = implement R2Storage with the
-same two methods and switch get_storage() — no route/app changes.
-"""
-
-import os
 from abc import ABC, abstractmethod
 
 from .config import settings
@@ -42,39 +37,7 @@ class SupabaseStorage(StorageBackend):
         return res.get("signedURL", res.get("signedUrl", ""))
 
 
-class LocalStorage(StorageBackend):
-    """Dev/test fallback when Supabase keys are absent. Serves acceptance test."""
-
-    def __init__(self, root: str = "./uploads"):
-        self.root = root
-        os.makedirs(root, exist_ok=True)
-
-    def upload(self, key: str, data: bytes, content_type: str) -> str:
-        path = os.path.join(self.root, key.replace("/", "_"))
-        with open(path, "wb") as f:
-            f.write(data)
-        return path
-
-    def signed_url(self, key: str, expires_s: int = 3600) -> str:
-        return f"/uploads/{key}"
-
-
-class R2Storage(StorageBackend):
-    """TODO: future Cloudflare R2 move — boto3 put_object/get_presigned_url here."""
-
-    def upload(self, key: str, data: bytes, content_type: str) -> str:
-        raise NotImplementedError("R2 not configured; set S3_* env and implement")
-
-    def signed_url(self, key: str, expires_s: int = 3600) -> str:
-        raise NotImplementedError("R2 not configured")
-
-
 def get_storage() -> StorageBackend:
-    if settings.SUPABASE_URL and settings.SUPABASE_SERVICE_KEY:
-        try:
-            return SupabaseStorage()
-        except Exception:
-            pass
-    if settings.S3_ENDPOINT and settings.S3_BUCKET:
-        return R2Storage()
-    return LocalStorage()
+    # Photos are part of the Supabase-only data plane. Missing credentials are
+    # surfaced to the caller instead of writing files to the local workspace.
+    return SupabaseStorage()
