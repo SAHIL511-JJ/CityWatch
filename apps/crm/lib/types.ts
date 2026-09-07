@@ -26,6 +26,22 @@ export interface Incident {
   created_at: string;
 }
 
+export interface Hotspot {
+  id: string;
+  category: string;
+  centroid: { lat: number; lng: number };
+  report_count: number;
+  unique_contributors: number;
+  first_observed: string;
+  last_observed: string;
+  severity_summary: Record<string, number>;
+  persistence_score: number;
+  trend: "rising" | "stable" | "declining" | "isolated";
+  mean_distance_km: number;
+  report_ids: string[];
+  explanation: string;
+}
+
 export interface IncidentNote {
   id: string;
   incident_id: string;

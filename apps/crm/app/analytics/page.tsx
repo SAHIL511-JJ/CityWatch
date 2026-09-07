@@ -17,6 +17,7 @@ import {
 } from "recharts";
 import { apiFetch } from "@/lib/api";
 import type { AnalyticsSummary, Incident } from "@/lib/types";
+import { categoryLabel } from "@/lib/taxonomy";
 import { Card } from "@/components/ui/card";
 import { Heatmap } from "@/components/map";
 
@@ -101,6 +102,10 @@ export default function AnalyticsPage() {
   const peak = useMemo(() => trend.reduce((m, d) => Math.max(m, d.count), 0), [trend]);
   const total = trend.reduce((s, d) => s + d.count, 0);
   const categories = summary.data?.by_category ?? [];
+  const displayCategories = categories.map((category) => ({
+    ...category,
+    label: categoryLabel(category.name),
+  }));
   const loading = summary.isLoading || incidents.isLoading;
   const err = (summary.error ?? incidents.error) as Error | null;
 
@@ -141,9 +146,9 @@ export default function AnalyticsPage() {
               ) : (
                 <div style={{ height: 260 }}>
                   <ResponsiveContainer>
-                    <BarChart data={categories} margin={{ top: 16 }}>
+                    <BarChart data={displayCategories} margin={{ top: 16 }}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                      <XAxis dataKey="label" tick={{ fontSize: 12 }} />
                       <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
                       <Tooltip />
                       <Bar dataKey="count" radius={[4, 4, 0, 0]}>

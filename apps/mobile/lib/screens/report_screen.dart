@@ -17,7 +17,7 @@ const _maxPhotoBytes = 8 * 1024 * 1024;
 const _allowedExts = ['jpg', 'jpeg', 'png'];
 const _kDraftPrefix = 'draft_';
 
-/// Guided 3-step report flow (KAN-23): Details → Photo → Location & review.
+/// Guided 3-step environmental observation flow (KAN-23): Details → Photo → Location & review.
 /// Inline errors, draft autosave, web-safe preview (bytes, never dart:io),
 /// human error copy, offline fallback into the outbox (KAN-28).
 class ReportScreen extends ConsumerStatefulWidget {
@@ -260,7 +260,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
     ];
     const descriptions = [
       'Start with the essentials. A clear report helps your neighborhood respond.',
-      'Add a clear photo of the incident. Only take a photo when it’s safe.',
+      'Add a clear photo of the environmental condition. Only take a photo when it’s safe.',
       'Confirm the location and check your details before sending.',
     ];
     final contents = <Widget>[
@@ -565,7 +565,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
 
   Widget _success() {
     return Scaffold(
-      appBar: AppBar(title: const Text('Report incident')),
+        appBar: AppBar(title: const Text('Report observation')),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),

@@ -50,6 +50,10 @@ class IncidentItem {
     this.photoUrl,
     this.status,
     this.severity,
+    this.category,
+    this.aiConfidence,
+    this.aiReason,
+    this.analysisVersion,
     this.createdAt,
   });
 
@@ -64,6 +68,16 @@ class IncidentItem {
       photoUrl: (json['photo_url'] ?? json['photoUrl']) as String?,
       status: json['status'] as String?,
       severity: json['severity'] as String?,
+      category: (json['ai_analysis'] is Map
+          ? (json['ai_analysis'] as Map)['category'] as String?
+          : null),
+      aiConfidence: (json['ai_confidence'] as num?)?.toDouble(),
+      aiReason: (json['ai_analysis'] is Map
+          ? (json['ai_analysis'] as Map)['reason'] as String?
+          : null),
+      analysisVersion: (json['ai_analysis'] is Map
+          ? (json['ai_analysis'] as Map)['analysis_version'] as String?
+          : null),
       createdAt: json['created_at'] as String?,
     );
   }
@@ -77,6 +91,10 @@ class IncidentItem {
   final String? photoUrl;
   final String? status;
   final String? severity;
+  final String? category;
+  final double? aiConfidence;
+  final String? aiReason;
+  final String? analysisVersion;
   final String? createdAt;
 }
 

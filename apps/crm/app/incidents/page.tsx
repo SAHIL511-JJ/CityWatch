@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, buildQuery, getApiBase, getToken } from "@/lib/api";
 import type { DuplicatePair, Incident, Severity, StaffMember } from "@/lib/types";
 import { staffName } from "@/lib/types";
+import { categoryLabel } from "@/lib/taxonomy";
 import { slaFor, slaLabel } from "@/lib/sla";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -496,6 +497,9 @@ function IncidentsInner() {
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5 capitalize">
                     <Badge value={inc.status} />
                     <Badge value={inc.severity} />
+                    <span className="rounded-full bg-[#e8f0e5] px-2 py-0.5 text-xs font-medium normal-case text-[#285e4a]">
+                      {categoryLabel(inc.ai_analysis?.category)}
+                    </span>
                     {sla && sla.state !== "ok" && (
                       <span
                         title={slaLabel(sla)}

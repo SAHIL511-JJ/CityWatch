@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
-import type { AnalyticsSummary, Incident } from "@/lib/types";
+import type { AnalyticsSummary, Hotspot, Incident } from "@/lib/types";
+import { categoryLabel } from "@/lib/taxonomy";
 import { slaFor } from "@/lib/sla";
 import { Card } from "@/components/ui/card";
 import {
@@ -112,6 +113,11 @@ export default function DashboardPage() {
   const recent = useQuery({
     queryKey: ["admin-recent"],
     queryFn: () => apiFetch<Incident[]>("/admin/incidents"),
+  });
+  const hotspots = useQuery({
+    queryKey: ["admin-hotspots"],
+    queryFn: () => apiFetch<Hotspot[]>("/admin/analytics/hotspots?limit=6"),
+    retry: false,
   });
 
   if (summary.isLoading) {
@@ -261,6 +267,36 @@ export default function DashboardPage() {
         <Kpi label="Critical severity" value={critical} sub={`${sevCount("high")} high-severity alongside · ${delta}`} spark={sparkCritical} accent="#dc2626" />
       </div>
 
+      <Card className="p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wider text-zinc-500">Recurring environmental signals</h2>
+            <p className="mt-1 text-sm text-zinc-500">Verified observations grouped by place, category, and time.</p>
+          </div>
+          <Link href="/analytics" className="text-xs font-semibold text-[#2a4a33] hover:underline">Open analytics →</Link>
+        </div>
+        {hotspots.isLoading ? (
+          <div className="mt-4 grid gap-2 sm:grid-cols-3"><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /></div>
+        ) : hotspots.error ? (
+          <p className="mt-4 rounded-lg bg-zinc-50 p-3 text-sm text-zinc-500">Signals are unavailable right now.</p>
+        ) : (hotspots.data ?? []).length === 0 ? (
+          <p className="mt-4 rounded-lg bg-zinc-50 p-3 text-sm text-zinc-500">No recurring signals yet — verified reports will surface here.</p>
+        ) : (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {(hotspots.data ?? []).map((spot) => (
+              <div key={spot.id} className="rounded-lg border border-zinc-200 bg-zinc-50/70 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-[#14231a]">{categoryLabel(spot.category)}</span>
+                  <span className="rounded-full bg-[#e8f0e5] px-2 py-0.5 text-[11px] font-bold text-[#285e4a]">{spot.persistence_score} signal</span>
+                </div>
+                <p className="mt-2 text-xs text-zinc-600">{spot.report_count} reports · {spot.unique_contributors} contributor{spot.unique_contributors === 1 ? "" : "s"} · {spot.trend}</p>
+                <p className="mt-1 line-clamp-2 text-xs text-zinc-500">{spot.explanation}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
         <Card className="p-5 lg:col-span-3">
           <div className="flex items-baseline justify-between">
@@ -346,7 +382,7 @@ export default function DashboardPage() {
                   {activeEntry ? (
                     <>
                       <span className="text-2xl font-bold tabular-nums capitalize text-[#14231a]">{activeEntry.count}</span>
-                      <span className="max-w-24 truncate text-[11px] capitalize text-zinc-500">{activeEntry.name}</span>
+                      <span className="max-w-24 truncate text-[11px] text-zinc-500">{categoryLabel(activeEntry.name)}</span>
                     </>
                   ) : (
                     <>
@@ -369,7 +405,7 @@ export default function DashboardPage() {
                     >
                       <span className="flex min-w-0 items-center gap-2">
                         <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: DONUT_COLORS[i % DONUT_COLORS.length] }} />
-                        <span className="capitalize">{c.name}</span>
+                        <span>{categoryLabel(c.name)}</span>
                       </span>
                       <span className="whitespace-nowrap font-bold tabular-nums">{c.count} <span className="font-normal text-zinc-400">· {pct}%</span></span>
                     </li>

@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../api_client.dart';
 import '../cw_theme.dart';
 import '../feed_filters.dart';
+import '../taxonomy.dart';
 
 enum _FeedState { loading, denied, failed, offline, empty, ready }
 
@@ -497,16 +498,23 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
 
   IconData _categoryIcon(String category) {
     switch (category) {
-      case 'crime':
-        return Icons.warning_amber_rounded;
-      case 'fire':
-        return Icons.local_fire_department_outlined;
-      case 'accident':
-        return Icons.car_crash_outlined;
-      case 'hazard':
+      case 'flooding':
+      case 'waterlogging':
+        return Icons.water_drop_outlined;
+      case 'blocked_drain':
+        return Icons.plumbing_outlined;
+      case 'waste':
+        return Icons.delete_sweep_outlined;
+      case 'sewage':
+        return Icons.water_damage_outlined;
+      case 'plastic':
+        return Icons.recycling_outlined;
+      case 'pollution':
+        return Icons.air_outlined;
+      case 'damaged_infrastructure':
         return Icons.construction_outlined;
       default:
-        return Icons.more_horiz;
+        return Icons.eco_outlined;
     }
   }
 
@@ -707,6 +715,14 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                             .textTheme
                             .titleLarge
                             ?.copyWith(fontSize: 20, height: 1.3)),
+                    if (e.category != null) ...[
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: _chip(environmentalCategoryLabel(e.category!),
+                            CwColors.mint, CwColors.pine),
+                      ),
+                    ],
                     const SizedBox(height: 8),
                     Text(e.description,
                         maxLines: 2,
@@ -724,7 +740,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                           child: Text(
                               e.address?.isNotEmpty == true
                                   ? e.address!
-                                  : 'Nearby incident',
+                                  : 'Nearby observation',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.bodySmall)),
@@ -827,6 +843,11 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                         _chip('VERIFIED', Colors.green.shade700, Colors.white),
                       ],
                     ),
+                    if (e.category != null) ...[
+                      const SizedBox(height: 10),
+                      _chip(environmentalCategoryLabel(e.category!),
+                          CwColors.mint, CwColors.pine),
+                    ],
                     const SizedBox(height: 8),
                     Text(e.title,
                         style: Theme.of(context).textTheme.headlineSmall),
@@ -839,6 +860,30 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(e.description),
+                    if (e.aiReason != null && e.aiReason!.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: CwColors.mint.withValues(alpha: .55),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(Icons.auto_awesome_outlined,
+                                size: 18, color: CwColors.pine),
+                            const SizedBox(width: 9),
+                            Expanded(
+                              child: Text(
+                                'Why it was classified: ${e.aiReason}',
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     Text(
                       e.address != null && e.address!.isNotEmpty

@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, getApiBase, getToken } from "@/lib/api";
 import type { DuplicatePair, IncidentDetail, Severity, StaffMember, StatusHistoryEntry } from "@/lib/types";
 import { staffName } from "@/lib/types";
+import { categoryLabel } from "@/lib/taxonomy";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -562,7 +563,7 @@ export default function IncidentDetailPage() {
               </button>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-sm capitalize">
-              <Badge value={String(ai.category ?? "—")} />
+              <Badge value={categoryLabel(ai.category)} />
               <Badge value={String(ai.severity ?? data.severity)} />
               <span className="text-zinc-600">
                 {aiConf !== null ? `${aiConf}% confident` : "Not analyzed yet"}
@@ -589,6 +590,11 @@ export default function IncidentDetailPage() {
             ) : (
               <p className="mt-2 text-sm text-zinc-500">
                 No AI result — run analysis to get one.
+              </p>
+            )}
+            {typeof ai.analysis_version === "string" && ai.analysis_version && (
+              <p className="mt-2 text-[11px] uppercase tracking-wide text-zinc-400">
+                Analysis contract {ai.analysis_version}
               </p>
             )}
           </Card>

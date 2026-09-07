@@ -6,7 +6,7 @@ import { Shell } from "@/components/sidebar";
 
 export const metadata: Metadata = {
   title: "CityWatch Ops",
-  description: "Ops CRM for incident review",
+  description: "Operations workspace for environmental observation review",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
