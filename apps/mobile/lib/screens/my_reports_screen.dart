@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api_client.dart';
+import '../cw_theme.dart';
 import '../outbox.dart';
 
 /// My reports (KAN-28): everything this device sent or queued,
 /// each with a live status. Auto-retries pending items on open.
 class MyReportsScreen extends ConsumerStatefulWidget {
-  const MyReportsScreen({super.key});
+  const MyReportsScreen({super.key, this.onReport});
+  final VoidCallback? onReport;
 
   @override
   ConsumerState<MyReportsScreen> createState() => _MyReportsScreenState();
@@ -55,9 +57,9 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
           children: [
             Text('My reports'),
             Text(
-              'Everything you have sent or saved offline',
+              'Your device’s saved report queue',
               style: TextStyle(
-                color: Color(0xFFB9C9BD),
+                color: CwColors.muted,
                 fontSize: 11,
                 fontWeight: FontWeight.w500,
               ),
@@ -78,12 +80,20 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
       body: _checking && items.isEmpty
           ? const Center(child: CircularProgressIndicator())
           : items.isEmpty
-              ? Center(
+              ? SingleChildScrollView(
                   child: Padding(
-                    padding: const EdgeInsets.all(28),
+                    padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
                     child: Column(
-                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        const CwPageIntro(
+                            eyebrow: 'Small actions matter',
+                            title: 'Your city.\nYour contribution.',
+                            description:
+                                'Keep track of reports saved on this device, from queued to reviewed.'),
+                        const SizedBox(height: 28),
+                        const NeighborhoodArt(height: 180),
+                        const SizedBox(height: 26),
                         Container(
                           width: 72,
                           height: 72,
@@ -95,14 +105,20 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
                               size: 34, color: Color(0xFF2E5B45)),
                         ),
                         const SizedBox(height: 18),
-                        Text('Your report trail is empty',
+                        Text('Every report starts with you',
+                            textAlign: TextAlign.center,
                             style: Theme.of(context).textTheme.titleLarge),
                         const SizedBox(height: 8),
                         Text(
-                          'Reports you send — even offline — will appear here with their live status.',
+                          'No reports in your device’s queue yet. When a report is saved offline, you can follow its progress here.',
                           textAlign: TextAlign.center,
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
+                        const SizedBox(height: 24),
+                        FilledButton.icon(
+                            onPressed: widget.onReport,
+                            icon: const Icon(Icons.add_rounded),
+                            label: const Text('Create a report')),
                       ],
                     ),
                   ),
@@ -113,9 +129,9 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
                     _refreshStatuses();
                   },
                   child: ListView.separated(
-                    padding: const EdgeInsets.all(12),
+                    padding: const EdgeInsets.all(20),
                     itemCount: items.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    separatorBuilder: (_, __) => const SizedBox(height: 14),
                     itemBuilder: (context, i) {
                       final e = items[i];
                       final status = e.state == 'sent'

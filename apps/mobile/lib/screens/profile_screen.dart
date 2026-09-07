@@ -29,7 +29,7 @@ class ProfileScreen extends ConsumerWidget {
             Text(
               'Your identity and feed preferences',
               style: TextStyle(
-                color: Color(0xFFB9C9BD),
+                color: CwColors.muted,
                 fontSize: 11,
                 fontWeight: FontWeight.w500,
               ),
@@ -38,12 +38,17 @@ class ProfileScreen extends ConsumerWidget {
         ),
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 28),
+        padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
         children: [
+          const CwPageIntro(
+              eyebrow: 'Your corner of CityWatch',
+              title: 'Good neighbors\nmake better cities.',
+              description: 'A little about you. A feed that feels local.'),
+          const SizedBox(height: 26),
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: const Color(0xFFD8E9D8),
+              color: CwColors.pineDeep,
               borderRadius: BorderRadius.circular(22),
             ),
             child: Row(
@@ -52,15 +57,16 @@ class ProfileScreen extends ConsumerWidget {
                   width: 54,
                   height: 54,
                   decoration: BoxDecoration(
-                    color: const Color(0xFF2E5B45),
+                    color: CwColors.pine,
                     borderRadius: BorderRadius.circular(17),
                   ),
                   child: Center(
-                    child: Text(auth.verified ? 'V' : 'A',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 22,
-                            fontWeight: FontWeight.w800)),
+                    child: Icon(
+                        auth.verified
+                            ? Icons.verified_outlined
+                            : Icons.person_outline_rounded,
+                        color: CwColors.mint,
+                        size: 28),
                   ),
                 ),
                 const SizedBox(width: 14),
@@ -72,13 +78,19 @@ class ProfileScreen extends ConsumerWidget {
                           auth.verified
                               ? 'Verified resident'
                               : 'Anonymous resident',
-                          style: Theme.of(context).textTheme.titleMedium),
+                          style: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(color: Colors.white)),
                       const SizedBox(height: 4),
                       Text(
                           auth.verified
                               ? 'Your reports rank higher in review.'
                               : 'Verify once to lift your reports.',
-                          style: Theme.of(context).textTheme.bodySmall),
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: CwColors.mint)),
                     ],
                   ),
                 ),
@@ -89,7 +101,8 @@ class ProfileScreen extends ConsumerWidget {
                     context,
                     MaterialPageRoute(builder: (_) => const VerifyScreen()),
                   ),
-                  icon: const Icon(Icons.arrow_forward_rounded),
+                  icon: const Icon(Icons.arrow_forward_rounded,
+                      color: CwColors.mint),
                 ),
               ],
             ),

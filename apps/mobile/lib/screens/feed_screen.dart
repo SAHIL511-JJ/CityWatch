@@ -32,7 +32,8 @@ String _distance(double lat1, double lng1, double lat2, double lng2) {
 }
 
 class FeedScreen extends ConsumerStatefulWidget {
-  const FeedScreen({super.key});
+  const FeedScreen({super.key, this.onReport});
+  final VoidCallback? onReport;
 
   @override
   ConsumerState<FeedScreen> createState() => _FeedScreenState();
@@ -41,10 +42,10 @@ class FeedScreen extends ConsumerStatefulWidget {
 class _FeedScreenState extends ConsumerState<FeedScreen> {
   List<IncidentItem> _items = [];
   _FeedState _state = _FeedState.loading;
-  String _errorDetail = '';
   Position? _pos;
   DateTime? _posAt;
   bool _manualPos = false;
+  final Map<String, Future<List<int>?>> _photos = {};
 
   @override
   void initState() {
@@ -69,7 +70,6 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   Future<void> _refresh() async {
     setState(() {
       _state = _FeedState.loading;
-      _errorDetail = '';
     });
     Position pos;
     try {
@@ -82,14 +82,12 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       if (!mounted) return;
       setState(() {
         _state = _FeedState.failed;
-        _errorDetail = 'GPS timed out after 12s.';
       });
       return;
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _state = _FeedState.failed;
-        _errorDetail = e.toString();
       });
       return;
     }
@@ -122,13 +120,11 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         _pos = pos;
         _posAt = DateTime.now();
         _state = offline ? _FeedState.offline : _FeedState.failed;
-        _errorDetail = e.message ?? e.toString();
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _state = _FeedState.failed;
-        _errorDetail = e.toString();
       });
     }
   }
@@ -216,7 +212,6 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       if (!mounted) return;
       setState(() {
         _state = _FeedState.failed;
-        _errorDetail = e.toString();
       });
     }
   }
@@ -235,35 +230,118 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
-        title: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Near you'),
-            Text(
-              'Verified reports around your current spot',
-              style: TextStyle(
-                color: Color(0xFFB9C9BD),
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                letterSpacing: .1,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh),
-            onPressed: _refresh,
+        title: Row(children: [
+          Container(
+            padding: const EdgeInsets.all(9),
+            decoration: BoxDecoration(
+                color: CwColors.pine, borderRadius: BorderRadius.circular(13)),
+            child:
+                const Icon(Icons.radar_rounded, color: Colors.white, size: 23),
           ),
+          const SizedBox(width: 10),
+          const Flexible(
+              child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text('citywatch',
+                style: TextStyle(
+                    fontSize: 23,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -1)),
+          )),
+        ]),
+        actions: [
+          IconButton.filledTonal(
+            tooltip: 'Refresh nearby reports',
+            icon: const Icon(Icons.refresh_rounded, size: 22),
+            onPressed: _state == _FeedState.loading ? null : _refresh,
+          ),
+          const SizedBox(width: 16),
         ],
       ),
-      body: Column(
-        children: [
-          _filterBar(radius, severity, category),
-          _gpsStrip(),
-          Expanded(child: _body()),
-        ],
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(22, 14, 22, 22),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const CwPageIntro(
+                      eyebrow: 'A little awareness. A better city.',
+                      title: 'Around your\nneighborhood.',
+                      description: 'Stay informed. Look out for each other.',
+                    ),
+                    const SizedBox(height: 24),
+                    Material(
+                      color: CwColors.mint,
+                      borderRadius: BorderRadius.circular(22),
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: widget.onReport,
+                        child: Padding(
+                          padding: const EdgeInsets.all(18),
+                          child: Row(children: [
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                  color: CwColors.paper.withValues(alpha: .65),
+                                  borderRadius: BorderRadius.circular(16)),
+                              child: const Icon(Icons.add_a_photo_outlined,
+                                  color: CwColors.pine, size: 25),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                                child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('See something? Share it.',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium),
+                                const SizedBox(height: 4),
+                                Text('A photo can make a difference.',
+                                    style:
+                                        Theme.of(context).textTheme.bodySmall),
+                              ],
+                            )),
+                            const SizedBox(width: 8),
+                            const Icon(Icons.arrow_forward_rounded,
+                                size: 20, color: CwColors.pine),
+                          ]),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SliverToBoxAdapter(child: _filterBar(radius, severity, category)),
+            SliverToBoxAdapter(child: _gpsStrip()),
+            if (_state == _FeedState.ready) ...[
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                sliver: SliverList.builder(
+                  itemCount: _items.length,
+                  itemBuilder: (_, i) => Padding(
+                    padding: const EdgeInsets.only(bottom: 18),
+                    child: _card(_items[i]),
+                  ),
+                ),
+              ),
+              const SliverToBoxAdapter(
+                  child: Padding(
+                padding: EdgeInsets.fromLTRB(20, 10, 20, 30),
+                child: Text('You’re all caught up. Thanks for looking out.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: CwColors.muted, fontSize: 12)),
+              )),
+            ] else
+              SliverToBoxAdapter(child: _body()),
+          ],
+        ),
       ),
     );
   }
@@ -276,11 +354,14 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     }
     return Container(
       color: Theme.of(context).colorScheme.surface,
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      padding: const EdgeInsets.fromLTRB(22, 0, 22, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               _filterDropdown<double>(
                 icon: Icons.radar_outlined,
@@ -311,9 +392,10 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                   if (_pos != null) _refresh();
                 },
               ),
-              const Spacer(),
               Text(
-                '${_items.length} nearby',
+                _state == _FeedState.ready
+                    ? '${_items.length} nearby'
+                    : 'Nearby reports',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
@@ -335,9 +417,13 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
                 return Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: ChoiceChip(
-                    avatar: c.isEmpty
-                        ? const Icon(Icons.apps, size: 16)
-                        : Icon(_categoryIcon(c), size: 15),
+                    showCheckmark: false,
+                    labelStyle: TextStyle(
+                        color: sel ? Colors.white : CwColors.ink,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12),
+                    avatar: Icon(c.isEmpty ? Icons.apps : _categoryIcon(c),
+                        size: 16, color: sel ? Colors.white : CwColors.pine),
                     label: Text(categoryLabel(c)),
                     selected: sel,
                     onSelected: (_) {
@@ -362,7 +448,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     required ValueChanged<T?> onChanged,
   }) {
     return Container(
-      height: 40,
+      height: 48,
       padding: const EdgeInsets.only(left: 10),
       decoration: BoxDecoration(
         color: CwColors.cream,
@@ -431,7 +517,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     final acc = _pos!.accuracy;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 2),
       color: stale ? Colors.amber.shade100 : Colors.transparent,
       child: Row(
         children: [
@@ -463,16 +549,23 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     switch (_state) {
       case _FeedState.loading:
         return ListView.separated(
-          itemCount: 4,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: 2,
           separatorBuilder: (_, __) => const SizedBox(height: 8),
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(20),
           itemBuilder: (_, __) => Card(
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(height: 120, color: Colors.grey.shade300),
+                  ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: const LinearProgressIndicator(
+                          minHeight: 150,
+                          backgroundColor: CwColors.mint,
+                          color: CwColors.sand)),
                   const SizedBox(height: 8),
                   Container(
                       height: 16, width: 180, color: Colors.grey.shade300),
@@ -499,10 +592,8 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         );
       case _FeedState.failed:
         return _stateCard(
-          'Could not get your spot',
-          _errorDetail.isEmpty
-              ? 'GPS did not respond. Try again or enter it by hand.'
-              : _errorDetail,
+          'Let’s find your neighborhood',
+          'We couldn’t load nearby reports. Try again or choose a location manually.',
           [
             FilledButton(onPressed: _refresh, child: const Text('Retry')),
             OutlinedButton(
@@ -554,6 +645,8 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            const NeighborhoodArt(height: 145),
+            const SizedBox(height: 18),
             Text(title, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
             Text(sub, textAlign: TextAlign.center),
@@ -573,48 +666,79 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     final dist = _pos == null
         ? ''
         : _distance(_pos!.latitude, _pos!.longitude, e.lat, e.lng);
-    final meta = [
-      _timeAgo(e.createdAt),
-      dist,
-      'verified',
-    ].where((s) => s.isNotEmpty).join(' · ');
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: () => _showDetail(e),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Container(width: 6, color: severityColor(e.severity)),
-            SizedBox(
-              width: 96,
-              height: 96,
-              child: _thumb(e.id),
-            ),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Column(
+            Stack(children: [
+              SizedBox(
+                  height: 190, width: double.infinity, child: _thumb(e.id)),
+              Positioned(
+                top: 14,
+                left: 14,
+                child: _chip('${(e.severity ?? 'low').toUpperCase()} PRIORITY',
+                    severityColor(e.severity), Colors.white),
+              ),
+              Positioned(
+                bottom: 14,
+                right: 14,
+                child: _chip('✓ Verified', CwColors.paper, CwColors.pine),
+              ),
+            ]),
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Text(
+                        [
+                          _timeAgo(e.createdAt),
+                          if (dist.isNotEmpty) '$dist away'
+                        ].where((s) => s.isNotEmpty).join('  ·  '),
+                        style: Theme.of(context).textTheme.bodySmall),
+                    const SizedBox(height: 9),
                     Text(e.title,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleSmall),
-                    const SizedBox(height: 2),
-                    Text(meta, style: Theme.of(context).textTheme.bodySmall),
-                    const SizedBox(height: 4),
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleLarge
+                            ?.copyWith(fontSize: 20, height: 1.3)),
+                    const SizedBox(height: 8),
                     Text(e.description,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall),
-                  ],
-                ),
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.all(8),
-              child: Icon(Icons.chevron_right, color: Colors.grey),
+                        style: const TextStyle(
+                            color: CwColors.muted, height: 1.5)),
+                    const SizedBox(height: 18),
+                    const Divider(height: 1),
+                    const SizedBox(height: 14),
+                    Row(children: [
+                      const Icon(Icons.location_on_outlined,
+                          size: 17, color: CwColors.pine),
+                      const SizedBox(width: 6),
+                      Expanded(
+                          child: Text(
+                              e.address?.isNotEmpty == true
+                                  ? e.address!
+                                  : 'Nearby incident',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall)),
+                      const SizedBox(width: 12),
+                      const Text('View report',
+                          style: TextStyle(
+                              color: CwColors.pine,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700)),
+                      const SizedBox(width: 6),
+                      const Icon(Icons.arrow_forward_rounded,
+                          size: 16, color: CwColors.pine),
+                    ]),
+                  ]),
             ),
           ],
         ),
@@ -625,16 +749,24 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   Widget _thumb(String id) {
     final api = ref.read(apiClientProvider);
     return FutureBuilder<List<int>?>(
-      future: api.fetchPhotoBytes(id),
+      future: _photos.putIfAbsent(id, () => api.fetchPhotoBytes(id)),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
-          return Container(color: Colors.grey.shade200);
+          return const ColoredBox(
+              color: CwColors.mint,
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
         }
         if (!ApiClient.hasRealPhoto(snap.data)) {
           return Container(
-            color: Colors.grey.shade200,
-            child: const Icon(Icons.image_not_supported_outlined,
-                color: Colors.grey),
+            color: CwColors.mint.withValues(alpha: .5),
+            child: const Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.photo_outlined, color: CwColors.pine, size: 32),
+                  SizedBox(height: 8),
+                  Text('Photo unavailable',
+                      style: TextStyle(color: CwColors.muted, fontSize: 12)),
+                ]),
           );
         }
         return Image.memory(
@@ -654,95 +786,99 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     final dist = _pos == null
         ? ''
         : _distance(_pos!.latitude, _pos!.longitude, e.lat, e.lng);
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.85,
-        builder: (_, ctl) => ListView(
-          controller: ctl,
-          padding: const EdgeInsets.all(20),
-          children: [
-            FutureBuilder<List<int>?>(
-              future: api.fetchPhotoBytes(e.id),
-              builder: (context, snap) {
-                if (!ApiClient.hasRealPhoto(snap.data)) {
-                  return Container(
-                    height: 160,
-                    color: Colors.grey.shade200,
-                    child: const Center(child: Text('Photo unavailable')),
-                  );
-                }
-                if (snap.connectionState == ConnectionState.waiting) {
-                  return Container(height: 160, color: Colors.grey.shade200);
-                }
-                return ClipRRect(
-                  borderRadius: BorderRadius.circular(12),
-                  child: Image.memory(Uint8List.fromList(snap.data!),
-                      height: 220, fit: BoxFit.cover),
-                );
-              },
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                _chip((e.severity ?? 'low').toUpperCase(),
-                    severityColor(e.severity), Colors.white),
-                const SizedBox(width: 8),
-                _chip('VERIFIED', Colors.green.shade700, Colors.white),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(e.title, style: Theme.of(context).textTheme.headlineSmall),
-            const SizedBox(height: 4),
-            Text(
-              [_timeAgo(e.createdAt), dist]
-                  .where((s) => s.isNotEmpty)
-                  .join(' · '),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 8),
-            Text(e.description),
-            const SizedBox(height: 12),
-            Text(
-              e.address != null && e.address!.isNotEmpty
-                  ? e.address!
-                  : '${e.lat.toStringAsFixed(5)}, ${e.lng.toStringAsFixed(5)}',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            if (e.address != null && e.address!.isNotEmpty)
-              Text('${e.lat.toStringAsFixed(5)}, ${e.lng.toStringAsFixed(5)}',
-                  style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: () => _openInMaps(e),
-                    icon: const Icon(Icons.map_outlined),
-                    label: const Text('Open in Google Maps'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  onPressed: () {
-                    Clipboard.setData(ClipboardData(
-                        text:
-                            'https://www.google.com/maps/search/?api=1&query=${e.lat},${e.lng}'));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Location link copied.')),
-                    );
-                  },
-                  icon: const Icon(Icons.link),
-                  label: const Text('Copy link'),
-                ),
-              ],
-            ),
-          ],
-        ),
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (context) => Scaffold(
+        appBar: AppBar(title: const Text('Neighborhood report')),
+        body: Center(
+            child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 760),
+                child: ListView(
+                  padding: const EdgeInsets.all(20),
+                  children: [
+                    FutureBuilder<List<int>?>(
+                      future: _photos.putIfAbsent(
+                          e.id, () => api.fetchPhotoBytes(e.id)),
+                      builder: (context, snap) {
+                        if (!ApiClient.hasRealPhoto(snap.data)) {
+                          return Container(
+                            height: 160,
+                            color: Colors.grey.shade200,
+                            child:
+                                const Center(child: Text('Photo unavailable')),
+                          );
+                        }
+                        if (snap.connectionState == ConnectionState.waiting) {
+                          return Container(
+                              height: 160, color: Colors.grey.shade200);
+                        }
+                        return ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.memory(Uint8List.fromList(snap.data!),
+                              height: 220, fit: BoxFit.cover),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        _chip((e.severity ?? 'low').toUpperCase(),
+                            severityColor(e.severity), Colors.white),
+                        const SizedBox(width: 8),
+                        _chip('VERIFIED', Colors.green.shade700, Colors.white),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(e.title,
+                        style: Theme.of(context).textTheme.headlineSmall),
+                    const SizedBox(height: 4),
+                    Text(
+                      [_timeAgo(e.createdAt), dist]
+                          .where((s) => s.isNotEmpty)
+                          .join(' · '),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(e.description),
+                    const SizedBox(height: 12),
+                    Text(
+                      e.address != null && e.address!.isNotEmpty
+                          ? e.address!
+                          : '${e.lat.toStringAsFixed(5)}, ${e.lng.toStringAsFixed(5)}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    if (e.address != null && e.address!.isNotEmpty)
+                      Text(
+                          '${e.lat.toStringAsFixed(5)}, ${e.lng.toStringAsFixed(5)}',
+                          style: Theme.of(context).textTheme.bodySmall),
+                    const SizedBox(height: 16),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        FilledButton.icon(
+                          onPressed: () => _openInMaps(e),
+                          icon: const Icon(Icons.map_outlined),
+                          label: const Text('Open in Google Maps'),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(
+                                text:
+                                    'https://www.google.com/maps/search/?api=1&query=${e.lat},${e.lng}'));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text('Location link copied.')),
+                            );
+                          },
+                          icon: const Icon(Icons.link),
+                          label: const Text('Copy link'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ))),
       ),
-    );
+    ));
   }
 
   Widget _chip(String label, Color bg, Color fg) {
