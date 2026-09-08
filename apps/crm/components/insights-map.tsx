@@ -148,9 +148,9 @@ function ViewportReporter({ onChange, suppressRef }: { onChange?: (bounds: MapBo
         max_lng: Number(bounds.getEast().toFixed(6)),
       });
     };
-    map.on("moveend", report);
+    map.on("dragend", report);
     return () => {
-      map.off("moveend", report);
+      map.off("dragend", report);
     };
   }, [map, onChange, suppressRef]);
 
@@ -316,7 +316,6 @@ export function InsightsMap({
       {fullscreen && <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-[#55705c]">Signal map · Esc to exit</p>}
       <div className="relative overflow-hidden rounded-[1.35rem] border border-[#dbe3d9] bg-[#e8eee7] shadow-[0_16px_45px_rgba(20,35,26,0.10)]">
         <MapContainer
-          key={`${center.join(",")}-${fullscreen ? "fullscreen" : "inline"}`}
           center={center}
           zoom={points.length ? 11 : 4}
           minZoom={3}

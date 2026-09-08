@@ -187,6 +187,7 @@ function AnalyticsPageContent() {
   }, [filters, initialFilters, router, searchParams]);
 
   const query = insightsQuery(filters);
+  const mapFitKey = useMemo(() => insightsQuery({ ...filters, bounds: null }), [filters]);
   const insights = useQuery({ queryKey: ["admin-insights", query], queryFn: () => apiFetch<InsightsSnapshot>(`/admin/insights${query}`), staleTime: 30000 });
   const data = insights.data;
   const narratives = data?.narratives ?? [];
@@ -252,7 +253,7 @@ function AnalyticsPageContent() {
         <section className="grid gap-5 lg:grid-cols-[minmax(0,1.55fr)_360px]">
           <Card className="overflow-hidden border-[#dfe5dd] p-0">
             <div className="flex flex-wrap items-end justify-between gap-3 p-5"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#55705c]">Geographic concentration</p><h2 className="mt-2 text-2xl font-bold tracking-[-0.03em] text-[#14231a]">Signal map</h2></div><p className="text-xs text-zinc-500">{visiblePoints.length} visible reports · click a cluster to expand</p></div>
-            <InsightsMap points={visiblePoints} fitKey={query} selectedId={selectedPointId} onSelect={selectPoint} onBoundsChange={onBoundsChange} height={540} />
+            <InsightsMap points={visiblePoints} fitKey={mapFitKey} selectedId={selectedPointId} onSelect={selectPoint} onBoundsChange={onBoundsChange} height={540} />
             <InsightsTimeline days={days} value={timelineDate} onChange={setTimelineDate} />
           </Card>
           <aside className="space-y-5">
