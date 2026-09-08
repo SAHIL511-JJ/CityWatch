@@ -19,6 +19,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { InsightsMap, type MapBounds } from "@/components/map";
 import { InsightsTimeline } from "@/components/insights-timeline";
+import { InsightActionPlan } from "@/components/insight-action-plan";
 import { apiFetch } from "@/lib/api";
 import { categoryLabel } from "@/lib/taxonomy";
 import { buildReplayDays, insightsQuery, localDayKey, readInsightsFilters, signalHref } from "@/lib/insights";
@@ -153,6 +154,7 @@ function SignalCard({ signal, filters, featured = false }: { signal: Hotspot; fi
         <div className="shrink-0 text-right"><p className="text-3xl font-bold tabular-nums text-[#14231a]">{signal.persistence_score}</p><p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">signal score</p></div>
       </div>
       <p className="mt-5 max-w-[62ch] text-sm leading-6 text-zinc-700">{signal.explanation}</p>
+      <div className="mt-5"><InsightActionPlan plan={signal.action_plan} compact={!featured} /></div>
       <div className="mt-5 grid grid-cols-2 gap-3 border-y border-black/10 py-4 xl:grid-cols-4"><Metric label="Reports" value={signal.report_count} /><Metric label="Contributors" value={signal.unique_contributors} /><Metric label="Mean spread" value={`${signal.mean_distance_km.toFixed(2)} km`} /><Metric label="Trend" value={signal.trend} /></div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-zinc-500">Last observed {dateTime(signal.last_observed)}</p><Link href={signalHref(signal.id, filters)} className="rounded-lg bg-[#14231a] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#285e4a] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Open evidence page →</Link></div>
     </article>

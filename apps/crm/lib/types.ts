@@ -9,6 +9,17 @@ export type IncidentStatus =
 
 export type Severity = "low" | "medium" | "high" | "critical";
 
+export type InsightActionPriority = "immediate" | "priority" | "routine";
+
+export interface InsightActionPlan {
+  priority: InsightActionPriority;
+  objective: string;
+  authority: string;
+  immediate_steps: string[];
+  escalate_when: string[];
+  verify: string;
+}
+
 export interface Incident {
   id: string;
   title: string;
@@ -40,6 +51,7 @@ export interface Hotspot {
   mean_distance_km: number;
   report_ids: string[];
   explanation: string;
+  action_plan: InsightActionPlan;
 }
 
 export interface InsightMapPoint {

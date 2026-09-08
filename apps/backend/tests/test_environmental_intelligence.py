@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from app.hotspots import _candidate_rows, detect_hotspots
 from app.insights import build_insights
+from app.action_playbooks import build_action_plan
 from app.models import Incident
 from app.taxonomy import ENVIRONMENTAL_CATEGORIES, canonical_category
 from app.worker import fake_ai, sanitize_ai_result
@@ -145,9 +146,51 @@ class EnvironmentalIntelligenceTests(unittest.TestCase):
         self.assertEqual(result["signal_count"], 2)
         self.assertEqual(result["narratives"][0]["category"], "flooding")
         self.assertEqual(result["narratives"][0]["report_count"], 3)
+        self.assertEqual(result["narratives"][0]["action_plan"]["priority"], "immediate")
+        self.assertEqual(result["narratives"][0]["action_plan"]["authority"], "Municipal drainage / public works")
         self.assertEqual(len(result["map_points"]), 4)
         self.assertEqual(len(result["summary"]["by_day"]), 30)
         self.assertLessEqual(len(limited["narratives"]), 1)
+
+    def test_action_playbooks_are_deterministic_and_priority_aware(self):
+        for category in ENVIRONMENTAL_CATEGORIES:
+            category_plan = build_action_plan({
+                "category": category,
+                "severity_summary": {},
+                "persistence_score": 10,
+                "trend": "stable",
+            })
+            self.assertEqual(len(category_plan["immediate_steps"]), 3)
+            self.assertEqual(len(category_plan["escalate_when"]), 2)
+            self.assertTrue(category_plan["objective"])
+            self.assertTrue(category_plan["verify"])
+
+        plan = build_action_plan({
+            "category": "blocked_drain",
+            "severity_summary": {"high": 2},
+            "persistence_score": 54,
+            "trend": "stable",
+        })
+        self.assertEqual(plan["priority"], "priority")
+        self.assertEqual(plan["authority"], "Drainage / sanitation services")
+        self.assertEqual(len(plan["immediate_steps"]), 3)
+        self.assertTrue(plan["verify"])
+
+        immediate = build_action_plan({
+            "category": "flooding",
+            "severity_summary": {"critical": 1},
+            "persistence_score": 10,
+            "trend": "stable",
+        })
+        self.assertEqual(immediate["priority"], "immediate")
+
+        fallback = build_action_plan({
+            "category": "unrecognised-category",
+            "severity_summary": {},
+            "persistence_score": 10,
+            "trend": "isolated",
+        })
+        self.assertEqual(fallback["authority"], "Local environmental response team")
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from geoalchemy2 import Geography
 from sqlalchemy import cast
 from sqlalchemy.orm import Session
 
+from .action_playbooks import build_action_plan
 from .hotspots import (
     MAX_CANDIDATES,
     _cluster_payload,
@@ -136,7 +137,11 @@ def build_insights(
         (_utc(row.created_at) for row in rows),
         default=datetime.now(timezone.utc),
     )
-    narratives = [_cluster_payload(group, now) for group in clusters]
+    narratives = []
+    for group in clusters:
+        narrative = _cluster_payload(group, now)
+        narrative["action_plan"] = build_action_plan(narrative)
+        narratives.append(narrative)
     narratives.sort(key=lambda item: (-item["persistence_score"], item["category"], item["id"]))
     points = [
         {
