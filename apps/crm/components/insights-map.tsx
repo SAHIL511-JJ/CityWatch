@@ -157,17 +157,31 @@ function ViewportReporter({ onChange, suppressRef }: { onChange?: (bounds: MapBo
   return null;
 }
 
-function ZoomReporter({ onChange }: { onChange: (zoom: number) => void }) {
+function ClusterLayer({ points, onSelect, suppressRef }: { points: InsightMapPoint[]; onSelect?: (point: InsightMapPoint) => void; suppressRef: MutableRefObject<boolean> }) {
   const map = useMap();
+  const [zoom, setZoom] = useState(() => map.getZoom());
+
   useEffect(() => {
-    const report = () => onChange(map.getZoom());
+    const report = () => {
+      const nextZoom = map.getZoom();
+      setZoom((currentZoom) => currentZoom === nextZoom ? currentZoom : nextZoom);
+    };
     report();
     map.on("zoomend", report);
     return () => {
       map.off("zoomend", report);
     };
-  }, [map, onChange]);
-  return null;
+  }, [map]);
+
+  const clusters = useMemo(() => clusterPoints(points, zoom), [points, zoom]);
+
+  return (
+    <>
+      {clusters.map((cluster) => (
+        <ClusterMarker key={cluster.id} cluster={cluster} onSelect={onSelect} suppressRef={suppressRef} />
+      ))}
+    </>
+  );
 }
 
 function FitToPoints({ points, fitKey, suppressRef }: { points: InsightMapPoint[]; fitKey: string; suppressRef: MutableRefObject<boolean> }) {
@@ -199,8 +213,12 @@ function clusterPoints(points: InsightMapPoint[], zoom: number): PointCluster[] 
     bucket.push(point);
     buckets.set(key, bucket);
   });
-  return Array.from(buckets.entries()).map(([id, bucket]) => ({
-    id,
+  return Array.from(buckets.values()).map((bucket) => ({
+    // Keep a cluster's React identity tied to its incident membership rather
+    // than its zoom bucket. The grid cell changes as the user zooms, but a
+    // cluster containing the same reports should not be unmounted and
+    // recreated on every zoomend event.
+    id: bucket.length === 1 ? bucket[0].id : `cluster:${bucket.map((point) => point.id).sort().join("|")}`,
     points: bucket,
     center: [
       bucket.reduce((sum, point) => sum + point.lat, 0) / bucket.length,
@@ -227,6 +245,10 @@ function clusterIcon(cluster: PointCluster) {
 function ClusterMarker({ cluster, onSelect, suppressRef }: { cluster: PointCluster; onSelect?: (point: InsightMapPoint) => void; suppressRef: MutableRefObject<boolean> }) {
   const map = useMap();
   const severity = dominantSeverity(cluster.points);
+  const icon = useMemo(
+    () => clusterIcon(cluster),
+    [cluster.id, cluster.points.length, severity],
+  );
   if (cluster.points.length === 1) {
     const point = cluster.points[0];
     return (
@@ -258,7 +280,7 @@ function ClusterMarker({ cluster, onSelect, suppressRef }: { cluster: PointClust
   return (
     <Marker
       position={cluster.center}
-      icon={clusterIcon(cluster)}
+      icon={icon}
       eventHandlers={{
         click: () => {
           suppressRef.current = true;
@@ -298,8 +320,6 @@ export function InsightsMap({
   const center: [number, number] = points.length ? [points[0].lat, points[0].lng] : [21, 78];
   const [fullscreen, setFullscreen] = useState(false);
   const suppressBounds = useRef(false);
-  const [zoom, setZoom] = useState(11);
-  const clusters = useMemo(() => clusterPoints(points, zoom), [points, zoom]);
 
   useEffect(() => {
     if (!fullscreen) return;
@@ -330,12 +350,9 @@ export function InsightsMap({
           />
           <FitToPoints points={points} fitKey={fitKey} suppressRef={suppressBounds} />
           <ViewportReporter onChange={onBoundsChange} suppressRef={suppressBounds} />
-          <ZoomReporter onChange={setZoom} />
           <MapControls fs={fullscreen} setFs={setFullscreen} />
           <ZoomHandlers />
-          {clusters.map((cluster) => (
-            <ClusterMarker key={cluster.id} cluster={cluster} onSelect={onSelect} suppressRef={suppressBounds} />
-          ))}
+          <ClusterLayer points={points} onSelect={onSelect} suppressRef={suppressBounds} />
           {selectedId && points.some((point) => point.id === selectedId) && (
             <CircleMarker
               center={[

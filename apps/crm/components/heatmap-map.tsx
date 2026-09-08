@@ -104,9 +104,16 @@ const severityColor: Record<string, string> = {
 
 function FitToPoints({ pts }: { pts: [number, number][] }) {
   const map = useMap();
+  const pointKey = pts.map((p) => p.join(",")).join(";");
   useEffect(() => {
-    if (pts.length > 1) map.fitBounds(L.latLngBounds(pts), { padding: [40, 40] });
-  }, [map, pts.map((p) => p.join(",")).join(";")]);
+    if (!pts.length) return;
+    const bounds = L.latLngBounds(pts);
+    if (pts.length === 1) {
+      map.setView(bounds.getCenter(), 14, { animate: false });
+    } else {
+      map.fitBounds(bounds, { padding: [40, 40] });
+    }
+  }, [map, pointKey]);
   return null;
 }
 
@@ -133,9 +140,11 @@ function BoundsReporter({ onChange }: { onChange?: (bounds: MapBounds) => void }
         max_lng: Number(bounds.getEast().toFixed(6)),
       });
     };
-    map.on("moveend", report);
+    // Panning changes the scoped data; zooming is local map navigation and
+    // must not trigger an API request or a page-level refresh.
+    map.on("dragend", report);
     return () => {
-      map.off("moveend", report);
+      map.off("dragend", report);
     };
   }, [map, onChange]);
   return null;
@@ -148,9 +157,6 @@ export function HeatmapMap({
   points: HeatPoint[];
   onBoundsChange?: (bounds: MapBounds) => void;
 }) {
-  // MapContainer freezes its view at mount, but points arrive async after
-  // the incidents query resolves — so remount (via key) once we know the
-  // real center instead of staying stuck at the [0,0] fallback.
   const center: [number, number] =
     points.length > 0 ? [points[0].lat, points[0].lng] : [21.0, 78.0];
   const [fs, setFs] = useState(false);
@@ -169,7 +175,6 @@ export function HeatmapMap({
       {fs && <p className="mb-2 text-sm font-medium text-zinc-600">Incident map — Esc to exit</p>}
       <div>
         <MapContainer
-          key={`${center.join(",")}-${fs ? "fs" : "inline"}`}
           center={center}
           zoom={points.length > 0 ? 11 : 4}
           minZoom={3}
