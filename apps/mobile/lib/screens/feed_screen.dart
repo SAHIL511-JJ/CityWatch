@@ -72,25 +72,30 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     setState(() {
       _state = _FeedState.loading;
     });
-    Position pos;
-    try {
-      pos = await _locate();
-    } on _Denied {
-      if (!mounted) return;
-      setState(() => _state = _FeedState.denied);
-      return;
-    } on TimeoutException {
-      if (!mounted) return;
-      setState(() {
-        _state = _FeedState.failed;
-      });
-      return;
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _state = _FeedState.failed;
-      });
-      return;
+    final usingManualPosition = _manualPos && _pos != null;
+    late final Position pos;
+    if (usingManualPosition) {
+      pos = _pos!;
+    } else {
+      try {
+        pos = await _locate();
+      } on _Denied {
+        if (!mounted) return;
+        setState(() => _state = _FeedState.denied);
+        return;
+      } on TimeoutException {
+        if (!mounted) return;
+        setState(() {
+          _state = _FeedState.failed;
+        });
+        return;
+      } catch (e) {
+        if (!mounted) return;
+        setState(() {
+          _state = _FeedState.failed;
+        });
+        return;
+      }
     }
     try {
       final items = await ref.read(apiClientProvider).fetchFeed(
@@ -108,7 +113,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       setState(() {
         _pos = pos;
         _posAt = DateTime.now();
-        _manualPos = false;
+        _manualPos = usingManualPosition;
         _items = items;
         _state = items.isEmpty ? _FeedState.empty : _FeedState.ready;
       });
