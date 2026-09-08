@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
-from app.hotspots import detect_hotspots
+from app.hotspots import _candidate_rows, detect_hotspots
 from app.models import Incident
 from app.taxonomy import ENVIRONMENTAL_CATEGORIES, canonical_category
 from app.worker import fake_ai, sanitize_ai_result
@@ -35,6 +35,44 @@ def _incident(
 
 
 class EnvironmentalIntelligenceTests(unittest.TestCase):
+    def test_centered_candidate_query_filters_before_limiting(self):
+        class QuerySpy:
+            def __init__(self):
+                self.limited = False
+                self.filter_calls = 0
+
+            def filter(self, *args):
+                self.assert_not_limited()
+                self.filter_calls += 1
+                return self
+
+            def order_by(self, *args):
+                return self
+
+            def limit(self, count):
+                self.limited = True
+                self.limit_count = count
+                return self
+
+            def all(self):
+                return []
+
+            def assert_not_limited(self):
+                if self.limited:
+                    raise AssertionError("candidate query filtered after LIMIT")
+
+        class DbSpy:
+            def __init__(self):
+                self.query_spy = QuerySpy()
+
+            def query(self, model):
+                return self.query_spy
+
+        db = DbSpy()
+        self.assertEqual(_candidate_rows(db, center_lat=18.5199, center_lng=73.8552, radius_km=0.75), [])
+        self.assertEqual(db.query_spy.filter_calls, 2)
+        self.assertEqual(db.query_spy.limit_count, 1000)
+
     def test_taxonomy_accepts_environmental_values_and_maps_legacy_values(self):
         self.assertEqual(len(ENVIRONMENTAL_CATEGORIES), 9)
         self.assertEqual(canonical_category("blocked drain"), "blocked_drain")

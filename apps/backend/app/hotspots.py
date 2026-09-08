@@ -67,7 +67,6 @@ def _candidate_rows(
         db.query(Incident)
         .filter(Incident.status == "verified")
         .order_by(Incident.created_at.asc(), Incident.id.asc())
-        .limit(MAX_CANDIDATES)
     )
     # Use the indexed Supabase PostGIS geography column for map-centred reads.
     if center_lat is not None and center_lng is not None and radius_km is not None:
@@ -78,7 +77,7 @@ def _candidate_rows(
             Geography("POINT", srid=4326),
         )
         q = q.filter(ST_DWithin(Incident.location, point, radius_km * 1000))
-    return q.all()
+    return q.limit(MAX_CANDIDATES).all()
 
 
 def _union_find_clusters(rows: list[Incident], radius_km: float, window_days: int) -> list[list[Incident]]:
