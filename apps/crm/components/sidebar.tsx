@@ -122,7 +122,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   const title =
     TITLES[pathname] ??
-    (pathname.startsWith("/incidents/") ? "Incident detail" : "CityWatch");
+    (pathname.startsWith("/incidents/")
+      ? "Incident detail"
+      : pathname.startsWith("/analytics/")
+        ? "Evidence detail"
+        : "CityWatch");
 
   const token = typeof window !== "undefined" ? getToken() : null;
   let initial = "OP";

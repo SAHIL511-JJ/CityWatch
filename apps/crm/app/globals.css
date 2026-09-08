@@ -5,3 +5,48 @@
 body {
   @apply bg-[#faf7f0] text-zinc-900 antialiased;
 }
+
+.citywatch-cluster-icon {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+}
+
+.citywatch-cluster-icon span {
+  align-items: center;
+  background: color-mix(in srgb, var(--cluster-color) 14%, #fffdf8);
+  border: 2px solid var(--cluster-color);
+  border-radius: 999px;
+  box-shadow: 0 6px 16px rgba(20, 35, 26, 0.18), 0 0 0 5px rgba(255, 253, 248, 0.72);
+  color: #14231a;
+  display: flex;
+  font-size: 12px;
+  font-weight: 700;
+  height: 38px;
+  justify-content: center;
+  width: 38px;
+}
+
+@keyframes citywatch-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 0.95; transform: scale(1.08); }
+}
+
+.leaflet-marker-icon.citywatch-cluster-icon:hover span {
+  animation: citywatch-pulse 1.2s ease-in-out infinite;
+}
+
+.leaflet-control-zoom a {
+  align-items: center;
+  background: rgba(255, 253, 248, 0.95) !important;
+  border-color: #dbe3d9 !important;
+  color: #14231a !important;
+  display: flex;
+  font-weight: 700;
+  justify-content: center;
+  transition: background 180ms ease;
+}
+
+.leaflet-control-zoom a:hover {
+  background: #f1f6ef !important;
+}

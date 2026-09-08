@@ -53,18 +53,28 @@ export interface InsightMapPoint {
   created_at: string | null;
 }
 
+export interface InsightBounds {
+  min_lat: number;
+  min_lng: number;
+  max_lat: number;
+  max_lng: number;
+}
+
+export interface InsightsFilters {
+  window_days: 7 | 30 | 90;
+  radius_km: string;
+  category: string;
+  severity: string;
+  bounds: InsightBounds | null;
+}
+
 export interface InsightsSnapshot {
   generated_at: string;
   scope: {
     window_days: number;
     radius_km: number;
     center: { lat: number; lng: number } | null;
-    bounds: {
-      min_lat: number;
-      min_lng: number;
-      max_lat: number;
-      max_lng: number;
-    } | null;
+    bounds: InsightBounds | null;
     category: string | null;
     severity: string | null;
   };
