@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 
 from app.hotspots import _candidate_rows, detect_hotspots
+from app.insights import build_insights
 from app.models import Incident
 from app.taxonomy import ENVIRONMENTAL_CATEGORIES, canonical_category
 from app.worker import fake_ai, sanitize_ai_result
@@ -128,6 +129,23 @@ class EnvironmentalIntelligenceTests(unittest.TestCase):
         with patch("app.hotspots._candidate_rows", return_value=rows):
             result = detect_hotspots(object(), radius_km=0.75, window_days=30)
         self.assertEqual(len(result), 3)
+
+    def test_insights_snapshot_returns_ranked_narratives_and_filtered_points(self):
+        base = datetime(2026, 9, 1, 8, 0, 0)
+        rows = [
+            _incident(category="flooding", lat=18.5200, lng=73.8550, created_at=base, reporter_id="a", severity="high"),
+            _incident(category="flooding", lat=18.5210, lng=73.8555, created_at=base + timedelta(days=3), reporter_id="b", severity="critical"),
+            _incident(category="flooding", lat=18.5198, lng=73.8548, created_at=base + timedelta(days=6), reporter_id="c", severity="high"),
+            _incident(category="plastic", lat=18.5201, lng=73.8551, created_at=base + timedelta(days=2), reporter_id="d"),
+        ]
+        with patch("app.insights._query_rows", return_value=rows):
+            result = build_insights(object(), window_days=30, radius_km=0.75)
+        self.assertEqual(result["summary"]["total"], 4)
+        self.assertEqual(result["signal_count"], 2)
+        self.assertEqual(result["narratives"][0]["category"], "flooding")
+        self.assertEqual(result["narratives"][0]["report_count"], 3)
+        self.assertEqual(len(result["map_points"]), 4)
+        self.assertEqual(len(result["summary"]["by_day"]), 30)
 
 
 if __name__ == "__main__":

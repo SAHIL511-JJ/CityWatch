@@ -1004,6 +1004,54 @@ def admin_hotspots(
     )
 
 
+@app.get("/admin/insights")
+def admin_insights(
+    window_days: int = Query(30, ge=1, le=365),
+    radius_km: float = Query(0.75, ge=0.05, le=25),
+    category: str | None = Query(None),
+    severity: str | None = Query(None),
+    center_lat: float | None = Query(None, ge=-90, le=90),
+    center_lng: float | None = Query(None, ge=-180, le=180),
+    min_lat: float | None = Query(None, ge=-90, le=90),
+    min_lng: float | None = Query(None, ge=-180, le=180),
+    max_lat: float | None = Query(None, ge=-90, le=90),
+    max_lng: float | None = Query(None, ge=-180, le=180),
+    staff: Staff = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+):
+    """Return one read-only snapshot for the CRM Insights workspace."""
+    if (center_lat is None) != (center_lng is None):
+        raise HTTPException(422, "center_lat and center_lng must be provided together")
+    bound_values = (min_lat, min_lng, max_lat, max_lng)
+    if any(value is not None for value in bound_values) and not all(
+        value is not None for value in bound_values
+    ):
+        raise HTTPException(422, "all map bounds must be provided together")
+    if min_lat is not None and max_lat is not None and min_lat > max_lat:
+        raise HTTPException(422, "min_lat must not exceed max_lat")
+    if min_lng is not None and max_lng is not None and min_lng > max_lng:
+        raise HTTPException(422, "min_lng must not exceed max_lng")
+    if severity and severity not in {"low", "medium", "high", "critical"}:
+        raise HTTPException(422, "invalid severity")
+
+    from .insights import build_insights
+
+    return build_insights(
+        db,
+        window_days=window_days,
+        radius_km=radius_km,
+        center_lat=center_lat,
+        center_lng=center_lng,
+        category=category,
+        severity=severity,
+        min_lat=min_lat,
+        min_lng=min_lng,
+        max_lat=max_lat,
+        max_lng=max_lng,
+        limit=3,
+    )
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
