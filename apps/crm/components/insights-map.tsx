@@ -23,6 +23,7 @@ const SEVERITY_COLOR: Record<string, string> = {
   high: "#c45a32",
   critical: "#b83b3b",
 };
+const INDIVIDUAL_POINT_ZOOM = 14;
 
 export interface InsightsMapProps {
   points: InsightMapPoint[];
@@ -202,7 +203,7 @@ function FitToPoints({ points, fitKey, suppressRef }: { points: InsightMapPoint[
 }
 
 function clusterPoints(points: InsightMapPoint[], zoom: number): PointCluster[] {
-  if (points.length < 2) {
+  if (points.length < 2 || zoom >= INDIVIDUAL_POINT_ZOOM) {
     return points.map((point) => ({ id: point.id, points: [point], center: [point.lat, point.lng] }));
   }
   const cellSize = Math.max(0.0012, 0.65 / 2 ** Math.max(0, zoom - 8));
