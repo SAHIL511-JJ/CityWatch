@@ -29,7 +29,7 @@ const TITLES: Record<string, string> = {
   "/incidents": "Incidents",
   "/users": "Users",
   "/staff": "Staff",
-  "/analytics": "Analytics",
+  "/analytics": "Insights",
 };
 
 export function Shell({ children }: { children: React.ReactNode }) {
@@ -116,7 +116,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     },
     {
       label: "Insights",
-      items: [{ href: "/analytics", label: "Analytics", icon: <Icon d={ICONS.analytics} /> }],
+      items: [{ href: "/analytics", label: "Insights", icon: <Icon d={ICONS.analytics} /> }],
     },
   ];
 

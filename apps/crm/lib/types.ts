@@ -42,6 +42,43 @@ export interface Hotspot {
   explanation: string;
 }
 
+export interface InsightMapPoint {
+  id: string;
+  lat: number;
+  lng: number;
+  title: string;
+  status: IncidentStatus;
+  severity: Severity;
+  category: string;
+  created_at: string | null;
+}
+
+export interface InsightsSnapshot {
+  generated_at: string;
+  scope: {
+    window_days: number;
+    radius_km: number;
+    center: { lat: number; lng: number } | null;
+    bounds: {
+      min_lat: number;
+      min_lng: number;
+      max_lat: number;
+      max_lng: number;
+    } | null;
+    category: string | null;
+    severity: string | null;
+  };
+  summary: {
+    total: number;
+    by_category: { name: string; count: number }[];
+    by_severity: { severity: string; count: number }[];
+    by_day: { date: string; count: number }[];
+  };
+  narratives: Hotspot[];
+  signal_count: number;
+  map_points: InsightMapPoint[];
+}
+
 export interface IncidentNote {
   id: string;
   incident_id: string;

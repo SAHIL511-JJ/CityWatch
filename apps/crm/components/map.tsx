@@ -2,6 +2,8 @@
 
 import dynamic from "next/dynamic";
 
+export type { MapBounds } from "./heatmap-map";
+
 export const Heatmap = dynamic(() => import("./heatmap-map").then((m) => m.HeatmapMap), {
   ssr: false,
   loading: () => <p>Loading map…</p>,

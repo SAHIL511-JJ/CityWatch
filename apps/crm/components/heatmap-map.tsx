@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import { Circle, CircleMarker, MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import { ZoomHandlers } from "./leaflet-controls";
@@ -11,6 +11,13 @@ export interface HeatPoint {
   severity: string;
   title?: string;
   status?: string;
+}
+
+export interface MapBounds {
+  min_lat: number;
+  min_lng: number;
+  max_lat: number;
+  max_lng: number;
 }
 
 function MapControls({ fs, setFs }: { fs: boolean; setFs: (v: boolean) => void }) {
@@ -103,7 +110,44 @@ function FitToPoints({ pts }: { pts: [number, number][] }) {
   return null;
 }
 
-export function HeatmapMap({ points }: { points: HeatPoint[] }) {
+function BoundsReporter({ onChange }: { onChange?: (bounds: MapBounds) => void }) {
+  const map = useMap();
+  const ready = useRef(false);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      ready.current = true;
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!onChange) return;
+    const report = () => {
+      if (!ready.current) return;
+      const bounds = map.getBounds();
+      onChange({
+        min_lat: Number(bounds.getSouth().toFixed(6)),
+        min_lng: Number(bounds.getWest().toFixed(6)),
+        max_lat: Number(bounds.getNorth().toFixed(6)),
+        max_lng: Number(bounds.getEast().toFixed(6)),
+      });
+    };
+    map.on("moveend", report);
+    return () => {
+      map.off("moveend", report);
+    };
+  }, [map, onChange]);
+  return null;
+}
+
+export function HeatmapMap({
+  points,
+  onBoundsChange,
+}: {
+  points: HeatPoint[];
+  onBoundsChange?: (bounds: MapBounds) => void;
+}) {
   // MapContainer freezes its view at mount, but points arrive async after
   // the incidents query resolves — so remount (via key) once we know the
   // real center instead of staying stuck at the [0,0] fallback.
@@ -140,6 +184,7 @@ export function HeatmapMap({ points }: { points: HeatPoint[] }) {
         attribution="Tiles &copy; Esri &mdash; Source: Esri, DeLorme, NAVTEQ, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), TomTom"
       />
       <FitToPoints pts={points.map((p) => [p.lat, p.lng])} />
+      <BoundsReporter onChange={onBoundsChange} />
       <MapControls fs={fs} setFs={setFs} />
       <ZoomHandlers />
       {points.map((p, i) => (
