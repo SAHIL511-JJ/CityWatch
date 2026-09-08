@@ -1008,6 +1008,7 @@ def admin_hotspots(
 def admin_insights(
     window_days: int = Query(30, ge=1, le=365),
     radius_km: float = Query(0.75, ge=0.05, le=25),
+    limit: int = Query(3, ge=1, le=50),
     category: str | None = Query(None),
     severity: str | None = Query(None),
     center_lat: float | None = Query(None, ge=-90, le=90),
@@ -1048,7 +1049,7 @@ def admin_insights(
         min_lng=min_lng,
         max_lat=max_lat,
         max_lng=max_lng,
-        limit=3,
+        limit=limit,
     )
 
 

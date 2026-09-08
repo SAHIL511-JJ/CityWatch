@@ -145,6 +145,7 @@ def _cluster_payload(rows: list[Incident], now: datetime) -> dict:
     score = round(100 * (0.30 * recurrence + 0.20 * recency + 0.20 * severity + 0.15 * confidence + 0.15 * concentration))
     reporters = {str(row.reporter_id) for row in ordered if row.reporter_id}
     severity_summary = dict(sorted(Counter(row.severity or "medium" for row in ordered).items()))
+    span_label = "within 24 hours" if span_days < 1 else f"across {span_days:.1f} days"
     return {
         "id": f"{category}:{centroid_lat:.5f}:{centroid_lng:.5f}",
         "category": category,
@@ -160,7 +161,7 @@ def _cluster_payload(rows: list[Incident], now: datetime) -> dict:
         "report_ids": [str(row.id) for row in ordered],
         "explanation": (
             f"{len(ordered)} {category.replace('_', ' ')} observations from "
-            f"{len(reporters)} contributor(s) across {span_days:.1f} days; "
+            f"{len(reporters)} contributor(s) {span_label}; "
             f"mean spread {mean_distance_km:.2f} km; "
             f"average confidence {confidence:.0%}."
         ),

@@ -140,12 +140,14 @@ class EnvironmentalIntelligenceTests(unittest.TestCase):
         ]
         with patch("app.insights._query_rows", return_value=rows):
             result = build_insights(object(), window_days=30, radius_km=0.75)
+            limited = build_insights(object(), window_days=30, radius_km=0.75, limit=1)
         self.assertEqual(result["summary"]["total"], 4)
         self.assertEqual(result["signal_count"], 2)
         self.assertEqual(result["narratives"][0]["category"], "flooding")
         self.assertEqual(result["narratives"][0]["report_count"], 3)
         self.assertEqual(len(result["map_points"]), 4)
         self.assertEqual(len(result["summary"]["by_day"]), 30)
+        self.assertLessEqual(len(limited["narratives"]), 1)
 
 
 if __name__ == "__main__":
