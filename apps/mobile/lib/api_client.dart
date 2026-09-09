@@ -98,6 +98,130 @@ class IncidentItem {
   final String? createdAt;
 }
 
+class ResolutionEvidenceItem {
+  ResolutionEvidenceItem({
+    required this.id,
+    required this.evidenceType,
+    required this.note,
+    required this.reviewOutcome,
+    required this.hasPhoto,
+    this.reviewNote,
+    this.createdAt,
+    this.reviewedAt,
+  });
+
+  factory ResolutionEvidenceItem.fromJson(Map<String, dynamic> json) {
+    return ResolutionEvidenceItem(
+      id: json['id']?.toString() ?? '',
+      evidenceType: json['evidence_type']?.toString() ?? '',
+      note: json['note']?.toString() ?? '',
+      reviewOutcome: json['review_outcome']?.toString() ?? 'pending',
+      hasPhoto: json['has_photo'] == true,
+      reviewNote: json['review_note']?.toString(),
+      createdAt: json['created_at']?.toString(),
+      reviewedAt: json['reviewed_at']?.toString(),
+    );
+  }
+
+  final String id;
+  final String evidenceType;
+  final String note;
+  final String reviewOutcome;
+  final bool hasPhoto;
+  final String? reviewNote;
+  final String? createdAt;
+  final String? reviewedAt;
+
+  bool get isAuthority => evidenceType == 'authority_resolution';
+}
+
+class HotspotItem {
+  HotspotItem({
+    required this.id,
+    required this.category,
+    required this.centroidLat,
+    required this.centroidLng,
+    required this.reportCount,
+    required this.uniqueContributors,
+    required this.firstObserved,
+    required this.lastObserved,
+    required this.severitySummary,
+    required this.latestStatus,
+    required this.persistenceScore,
+    required this.trend,
+    required this.meanDistanceKm,
+    required this.reportIds,
+    required this.explanation,
+  });
+
+  factory HotspotItem.fromJson(Map<String, dynamic> json) {
+    final centroid = Map<String, dynamic>.from(
+      (json['centroid'] as Map?) ?? const <String, dynamic>{},
+    );
+    final summary = <String, int>{};
+    final rawSummary = (json['severity_summary'] as Map?) ?? const {};
+    for (final entry in rawSummary.entries) {
+      summary[entry.key.toString()] = (entry.value as num?)?.toInt() ?? 0;
+    }
+    return HotspotItem(
+      id: json['id']?.toString() ?? '',
+      category: json['category']?.toString() ?? 'other_environmental_condition',
+      centroidLat: (centroid['lat'] as num?)?.toDouble() ?? 0,
+      centroidLng: (centroid['lng'] as num?)?.toDouble() ?? 0,
+      reportCount: (json['report_count'] as num?)?.toInt() ?? 0,
+      uniqueContributors: (json['unique_contributors'] as num?)?.toInt() ?? 0,
+      firstObserved: json['first_observed']?.toString(),
+      lastObserved: json['last_observed']?.toString(),
+      severitySummary: summary,
+      latestStatus: json['latest_status']?.toString() ?? 'verified',
+      persistenceScore: (json['persistence_score'] as num?)?.toInt() ?? 0,
+      trend: json['trend']?.toString() ?? 'stable',
+      meanDistanceKm: (json['mean_distance_km'] as num?)?.toDouble() ?? 0,
+      reportIds: ((json['report_ids'] as List?) ?? const [])
+          .map((id) => id.toString())
+          .toList(),
+      explanation: json['explanation']?.toString() ?? '',
+    );
+  }
+
+  final String id;
+  final String category;
+  final double centroidLat;
+  final double centroidLng;
+  final int reportCount;
+  final int uniqueContributors;
+  final String? firstObserved;
+  final String? lastObserved;
+  final Map<String, int> severitySummary;
+  final String latestStatus;
+  final int persistenceScore;
+  final String trend;
+  final double meanDistanceKm;
+  final List<String> reportIds;
+  final String explanation;
+
+  DateTime? get firstObservedAt =>
+      firstObserved == null ? null : DateTime.tryParse(firstObserved!);
+
+  DateTime? get lastObservedAt =>
+      lastObserved == null ? null : DateTime.tryParse(lastObserved!);
+
+  String get trendLabel => switch (trend) {
+        'rising' => 'Rising',
+        'declining' => 'Declining',
+        'isolated' => 'New signal',
+        _ => 'Persistent',
+      };
+
+  String get severityLabel {
+    const order = ['critical', 'high', 'medium', 'low'];
+    for (final value in order) {
+      if ((severitySummary[value] ?? 0) > 0) return value;
+    }
+    return 'medium';
+  }
+}
+
 class ApiClient {
   ApiClient(this._dio);
 
@@ -148,8 +272,7 @@ class ApiClient {
       'lat': lat,
       'lng': lng,
       if (address != null && address.isNotEmpty) 'address': address,
-      if (photo != null)
-        'photo': await MultipartFile.fromFile(photo.path),
+      if (photo != null) 'photo': await MultipartFile.fromFile(photo.path),
     });
     final res = await _dio.post<Map<String, dynamic>>(
       '/incidents',
@@ -212,9 +335,85 @@ class ApiClient {
         .toList();
   }
 
+  /// GET /hotspots?lat&lng&radius_km&window_days&limit&category&severity&trend.
+  Future<List<HotspotItem>> fetchHotspots({
+    required double lat,
+    required double lng,
+    double radiusKm = 10,
+    int windowDays = 30,
+    String? category,
+    String? severity,
+    String? trend,
+    int limit = 6,
+  }) async {
+    final res = await _dio.get<List<dynamic>>(
+      '/hotspots',
+      queryParameters: {
+        'lat': lat,
+        'lng': lng,
+        'radius_km': radiusKm,
+        'window_days': windowDays,
+        'limit': limit,
+        if (category != null && category.isNotEmpty) 'category': category,
+        if (severity != null && severity.isNotEmpty) 'severity': severity,
+        if (trend != null && trend.isNotEmpty) 'trend': trend,
+      },
+    );
+    final list = res.data ?? <dynamic>[];
+    return list
+        .whereType<Map>()
+        .map((item) => HotspotItem.fromJson(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
   Future<Map<String, dynamic>> fetchIncident(String id) async {
     final res = await _dio.get<Map<String, dynamic>>('/incidents/$id');
     return res.data ?? <String, dynamic>{};
+  }
+
+  /// Owner-safe report detail; works for every incident status.
+  Future<Map<String, dynamic>> fetchMyIncident(String id) async {
+    final res = await _dio.get<Map<String, dynamic>>('/me/incidents/$id');
+    return res.data ?? <String, dynamic>{};
+  }
+
+  /// Safe resolution timeline, available to any signed-in citizen.
+  Future<Map<String, dynamic>> fetchResolution(String id) async {
+    final res =
+        await _dio.get<Map<String, dynamic>>('/incidents/$id/resolution');
+    return res.data ?? <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> submitResolutionFollowUp({
+    required String incidentId,
+    required String observation,
+    required XFile photo,
+  }) async {
+    final form = FormData.fromMap({
+      'observation': observation,
+      'photo': MultipartFile.fromBytes(
+        await photo.readAsBytes(),
+        filename: photo.name,
+      ),
+    });
+    final res = await _dio.post<Map<String, dynamic>>(
+      '/incidents/$incidentId/resolution-evidence',
+      data: form,
+    );
+    return res.data ?? <String, dynamic>{};
+  }
+
+  Future<List<int>?> fetchResolutionEvidencePhoto(String evidenceId) async {
+    try {
+      final res = await _dio.get<List<int>>(
+        '/resolution-evidence/$evidenceId/photo',
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return res.data;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) return null;
+      rethrow;
+    }
   }
 
   /// Public photo URL for reels cards. Backend serves verified only, else 404.

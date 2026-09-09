@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api_client.dart';
 import '../cw_theme.dart';
 import '../outbox.dart';
+import 'resolution_detail_screen.dart';
 
 /// My reports (KAN-28): everything this device sent or queued,
 /// each with a live status. Auto-retries pending items on open.
@@ -35,8 +36,10 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
       final items = ref.read(outboxProvider).where((e) => e.remoteId != null);
       for (final item in items) {
         try {
-          final j = await api.fetchIncident(item.remoteId!);
-          _liveStatus[item.id] = (j['status'] as String?) ?? 'processing';
+          final j = await api.fetchMyIncident(item.remoteId!);
+          final incident = j['incident'] as Map?;
+          _liveStatus[item.id] =
+              (incident?['status'] as String?) ?? 'processing';
         } catch (_) {
           // Keep last known state; never leak exceptions.
         }
@@ -139,6 +142,15 @@ class _MyReportsScreenState extends ConsumerState<MyReportsScreen> {
                           : e.state;
                       return Card(
                         child: ListTile(
+                          onTap: e.state == 'sent' && e.remoteId != null
+                              ? () => Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => ResolutionDetailScreen(
+                                        incidentId: e.remoteId!,
+                                      ),
+                                    ),
+                                  )
+                              : null,
                           contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 8),
                           leading: Icon(
