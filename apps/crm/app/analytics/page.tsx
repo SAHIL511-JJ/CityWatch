@@ -143,6 +143,9 @@ function FilterBar({
               <option value="verified">Verified</option>
               <option value="escalated">Escalated</option>
               <option value="resolved">Resolved</option>
+              <option value="awaiting_verification">Awaiting verification</option>
+              <option value="community_confirmed">Community confirmed</option>
+              <option value="needs_follow_up">Needs follow-up</option>
               <option value="closed">Closed</option>
             </select>
           </label>

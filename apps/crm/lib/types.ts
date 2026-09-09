@@ -5,6 +5,9 @@ export type IncidentStatus =
   | "rejected"
   | "escalated"
   | "resolved"
+  | "awaiting_verification"
+  | "community_confirmed"
+  | "needs_follow_up"
   | "closed";
 
 export type Severity = "low" | "medium" | "high" | "critical";
@@ -134,7 +137,28 @@ export interface IncidentReporter {
 export interface IncidentDetail extends Incident {
   notes: IncidentNote[];
   history: StatusHistoryEntry[];
+  resolution_evidence: ResolutionEvidence[];
   reporter?: IncidentReporter | null;
+}
+
+export type ResolutionEvidenceType = "authority_resolution" | "community_follow_up";
+export type ResolutionReviewOutcome = "not_applicable" | "pending" | "confirmed" | "needs_follow_up";
+
+export interface ResolutionEvidence {
+  id: string;
+  incident_id?: string;
+  parent_evidence_id?: string | null;
+  hotspot_snapshot_id?: string | null;
+  evidence_type: ResolutionEvidenceType;
+  submitted_by?: string;
+  note: string;
+  photo_url?: string | null;
+  has_photo: boolean;
+  review_outcome: ResolutionReviewOutcome;
+  review_note?: string | null;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  created_at: string;
 }
 
 export interface AnalyticsSummary {

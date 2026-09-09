@@ -26,10 +26,11 @@ interface ApiOptions extends RequestInit {
 export async function apiFetch<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   const { auth = true, headers, ...rest } = opts;
   const token = auth ? getToken() : null;
+  const isFormData = typeof FormData !== "undefined" && rest.body instanceof FormData;
   const res = await fetch(`${getApiBase()}${path}`, {
     ...rest,
     headers: {
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(headers ?? {}),
     },

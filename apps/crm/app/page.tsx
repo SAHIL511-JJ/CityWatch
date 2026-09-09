@@ -28,6 +28,9 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
   verified: { label: "Verified", color: "#2563eb" },
   escalated: { label: "Escalated", color: "#7c3aed" },
   resolved: { label: "Resolved", color: "#15803d" },
+  awaiting_verification: { label: "Awaiting verification", color: "#b45309" },
+  community_confirmed: { label: "Community confirmed", color: "#047857" },
+  needs_follow_up: { label: "Needs follow-up", color: "#be123c" },
   rejected: { label: "Rejected", color: "#71717a" },
   closed: { label: "Closed", color: "#52525b" },
 };
@@ -167,8 +170,8 @@ export default function DashboardPage() {
   const sparkCritical = byDay.map((d) => ({ date: d.date, count: d.critical ?? 0 }));
   const statusCount = (s: string) => byStatus.find((x) => x.status === s)?.count ?? 0;
   const sevCount = (s: string) => bySev.find((x) => x.severity === s)?.count ?? 0;
-  const open = statusCount("processing") + statusCount("needs_review") + statusCount("verified") + statusCount("escalated");
-  const resolved = statusCount("resolved");
+  const open = statusCount("processing") + statusCount("needs_review") + statusCount("verified") + statusCount("escalated") + statusCount("awaiting_verification") + statusCount("needs_follow_up");
+  const resolved = statusCount("resolved") + statusCount("community_confirmed");
   const critical = sevCount("critical");
   const maxDay = Math.max(1, ...byDay.map((d) => d.count));
   const last7 = byDay.slice(-7);

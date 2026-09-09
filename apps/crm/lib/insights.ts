@@ -61,7 +61,18 @@ export function readInsightsFilters(params: URLSearchParams): InsightsFilters {
     category: params.get("category") || "",
     severity: params.get("severity") || "",
     trend: ["rising", "stable", "declining", "isolated"].includes(params.get("trend") || "") ? params.get("trend")! : "",
-    status: ["all", "verified", "escalated", "resolved", "closed"].includes(params.get("status") || "") ? params.get("status")! : "verified",
+    status: [
+      "all",
+      "verified",
+      "escalated",
+      "resolved",
+      "awaiting_verification",
+      "community_confirmed",
+      "needs_follow_up",
+      "closed",
+    ].includes(params.get("status") || "")
+      ? params.get("status")!
+      : "verified",
     bounds: readBounds(params),
   };
 }

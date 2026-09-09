@@ -16,7 +16,28 @@ import { Input } from "@/components/ui/input";
 
 const FONT = { fontFamily: "Verdana, Geneva, sans-serif" } as const;
 
-const STATUSES = ["processing", "needs_review", "verified", "rejected", "escalated", "resolved", "closed"];
+const STATUSES = [
+  "processing",
+  "needs_review",
+  "verified",
+  "rejected",
+  "escalated",
+  "awaiting_verification",
+  "community_confirmed",
+  "needs_follow_up",
+  "closed",
+];
+const STATUS_LABELS: Record<string, string> = {
+  processing: "Processing",
+  needs_review: "Needs review",
+  verified: "Verified",
+  rejected: "Rejected",
+  escalated: "Escalated",
+  awaiting_verification: "Awaiting verification",
+  community_confirmed: "Community confirmed",
+  needs_follow_up: "Needs follow-up",
+  closed: "Closed",
+};
 const SEVERITIES: Severity[] = ["low", "medium", "high", "critical"];
 const SEV_RANK: Record<Severity, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 const SEV_BAR: Record<Severity, string> = {
@@ -288,7 +309,7 @@ function IncidentsInner() {
               <option value="">All statuses</option>
               {STATUSES.map((s) => (
                 <option key={s} value={s} className="capitalize">
-                  {s.replace("_", " ")}
+                  {STATUS_LABELS[s] ?? s}
                 </option>
               ))}
             </select>
@@ -372,7 +393,6 @@ function IncidentsInner() {
               ["verified", "Approve"],
               ["rejected", "Reject"],
               ["escalated", "Escalate"],
-              ["resolved", "Resolve"],
             ] as const
           ).map(([s, label]) => (
             <button

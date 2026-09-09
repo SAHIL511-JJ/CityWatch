@@ -8,7 +8,7 @@ export const SLA_HOURS: Record<Severity, number> = {
   low: 48,
 };
 
-const TERMINAL = new Set(["resolved", "closed"]);
+const TERMINAL = new Set(["resolved", "community_confirmed", "closed"]);
 
 export type SlaState = "overdue" | "breaching" | "ok";
 

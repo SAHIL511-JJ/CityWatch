@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, getApiBase, getToken } from "@/lib/api";
-import type { DuplicatePair, IncidentDetail, Severity, StaffMember, StatusHistoryEntry } from "@/lib/types";
+import type { DuplicatePair, IncidentDetail, ResolutionEvidence, Severity, StaffMember, StatusHistoryEntry } from "@/lib/types";
 import { staffName } from "@/lib/types";
 import { categoryLabel } from "@/lib/taxonomy";
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +36,9 @@ const DOT: Record<string, string> = {
   rejected: "bg-red-500",
   escalated: "bg-purple-500",
   resolved: "bg-blue-500",
+  awaiting_verification: "bg-amber-500",
+  community_confirmed: "bg-emerald-500",
+  needs_follow_up: "bg-rose-500",
   closed: "bg-zinc-400",
   processing: "bg-yellow-500",
   needs_review: "bg-orange-500",
@@ -72,6 +75,14 @@ function avatarOf(name: string | null, id: string | null | undefined): string {
 }
 
 type CollapsedGroup = { key: string; entries: StatusHistoryEntry[]; count: number };
+type TimelineItem = {
+  id: string;
+  at: string;
+  label: string;
+  detail: string;
+  actor: string;
+  tone: string;
+};
 
 function CompareRow({
   pair,
@@ -206,6 +217,10 @@ export default function IncidentDetailPage() {
   const [hideNoops, setHideNoops] = useState(true);
   const [toast, setToast] = useState<{ msg: string; undo: () => void } | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [authorityAction, setAuthorityAction] = useState("");
+  const [authorityPhoto, setAuthorityPhoto] = useState<File | null>(null);
+  const [hotspotSnapshotId, setHotspotSnapshotId] = useState("");
+  const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
 
   // reset local edits when switching incidents
   useEffect(() => {
@@ -218,6 +233,10 @@ export default function IncidentDetailPage() {
     setReason("");
     setExpandedGroups({});
     setToast(null);
+    setAuthorityAction("");
+    setAuthorityPhoto(null);
+    setHotspotSnapshotId("");
+    setReviewNotes({});
   }, [id]);
 
   // Esc closes the lightbox
@@ -271,6 +290,38 @@ export default function IncidentDetailPage() {
     onSuccess: () => {
       setNote("");
       refresh();
+    },
+  });
+
+  const submitAuthority = useMutation({
+    mutationFn: () => {
+      const form = new FormData();
+      form.append("action_taken", authorityAction.trim());
+      if (hotspotSnapshotId.trim()) form.append("hotspot_snapshot_id", hotspotSnapshotId.trim());
+      if (authorityPhoto) form.append("photo", authorityPhoto);
+      return apiFetch(`/admin/incidents/${id}/resolution-evidence`, {
+        method: "POST",
+        body: form,
+      });
+    },
+    onSuccess: () => {
+      setAuthorityAction("");
+      setAuthorityPhoto(null);
+      setHotspotSnapshotId("");
+      refresh();
+      setToast({ msg: "Authority resolution submitted — awaiting verification", undo: () => setToast(null) });
+    },
+  });
+
+  const reviewEvidence = useMutation({
+    mutationFn: ({ evidenceId, outcome }: { evidenceId: string; outcome: "confirmed" | "needs_follow_up" }) =>
+      apiFetch(`/admin/resolution-evidence/${evidenceId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ outcome, review_note: reviewNotes[evidenceId]?.trim() || null }),
+      }),
+    onSuccess: () => {
+      refresh();
+      setToast({ msg: "Community follow-up reviewed", undo: () => setToast(null) });
     },
   });
 
@@ -330,11 +381,45 @@ export default function IncidentDetailPage() {
       : groups;
   }, [data?.history, hideNoops]);
 
+  const resolutionTimeline = useMemo<TimelineItem[]>(() => {
+    const history = (data?.history ?? []).map((item) => ({
+      id: `status-${item.id}`,
+      at: item.changed_at,
+      label: "Status change",
+      detail: `${item.old_status ?? "created"} → ${item.new_status}`,
+      actor: whoName(item.changed_by),
+      tone: DOT[item.new_status] ?? "bg-zinc-300",
+    }));
+    const evidence = (data?.resolution_evidence ?? []).map((item) => ({
+      id: `evidence-${item.id}`,
+      at: item.created_at,
+      label: item.evidence_type === "authority_resolution"
+        ? "Authority evidence"
+        : "Community evidence",
+      detail: item.note,
+      actor: item.evidence_type === "authority_resolution"
+        ? whoName(item.submitted_by)
+        : "Community member",
+      tone: item.evidence_type === "authority_resolution" ? "bg-emerald-500" : "bg-amber-500",
+    }));
+    return [...history, ...evidence].sort((a, b) => {
+      const time = new Date(a.at).getTime() - new Date(b.at).getTime();
+      return time || a.id.localeCompare(b.id);
+    });
+  }, [data?.history, data?.resolution_evidence, staffList.data]);
+
   if (isLoading) return <p>Loading…</p>;
   if (error) return <p className="text-red-600">{(error as Error).message}</p>;
   if (!data) return <p>Not found</p>;
 
   const ai = (data.ai_analysis ?? {}) as Record<string, unknown>;
+  const resolutionEvidence: ResolutionEvidence[] = data.resolution_evidence ?? [];
+  const authorityEvidence = resolutionEvidence.filter((item) => item.evidence_type === "authority_resolution");
+  const latestAuthority = authorityEvidence[authorityEvidence.length - 1];
+  const pendingFollowUps = resolutionEvidence.filter(
+    (item) => item.evidence_type === "community_follow_up" && item.review_outcome === "pending"
+  );
+  const canSubmitAuthority = ["verified", "escalated", "resolved", "needs_follow_up"].includes(data.status);
   const photoSrc = data.photo_url
     ? `${getApiBase()}/admin/incidents/${id}/photo?token=${getToken() ?? ""}`
     : null;
@@ -476,6 +561,211 @@ export default function IncidentDetailPage() {
           </Card>
 
           <Card>
+            <SectionTitle>Resolution workflow</SectionTitle>
+            {data.status === "awaiting_verification" ? (
+              <p className="text-sm text-amber-800">
+                Authority evidence is waiting for a community member to verify the outcome.
+              </p>
+            ) : data.status === "community_confirmed" ? (
+              <p className="text-sm text-emerald-800">The community confirmed this resolution.</p>
+            ) : canSubmitAuthority ? (
+              <>
+                <p className="mb-3 text-xs leading-relaxed text-zinc-500">
+                  Record what the authority did and attach an after-photo. This moves the incident into awaiting verification.
+                </p>
+                <textarea
+                  value={authorityAction}
+                  onChange={(e) => setAuthorityAction(e.target.value)}
+                  maxLength={2000}
+                  rows={3}
+                  placeholder="Describe the repair, cleanup, inspection, or other action taken…"
+                  className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-[#2a4a33] focus:ring-2 focus:ring-[#dce8dc]"
+                />
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  <label className="block text-xs text-zinc-500">
+                    After-photo (JPG/PNG, required)
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png"
+                      onChange={(e) => setAuthorityPhoto(e.target.files?.[0] ?? null)}
+                      className="mt-1 block w-full rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs"
+                    />
+                  </label>
+                  <label className="block text-xs text-zinc-500">
+                    Hotspot snapshot ID (optional)
+                    <input
+                      value={hotspotSnapshotId}
+                      onChange={(e) => setHotspotSnapshotId(e.target.value)}
+                      maxLength={255}
+                      placeholder="Snapshot identifier"
+                      className="mt-1 block w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-[#2a4a33]"
+                    />
+                  </label>
+                </div>
+                <button
+                  disabled={!authorityAction.trim() || !authorityPhoto || submitAuthority.isPending}
+                  onClick={() => submitAuthority.mutate()}
+                  className="mt-3 inline-flex items-center justify-center rounded-md bg-[#14231a] px-4 py-2 text-sm font-medium text-white hover:bg-[#2a4a33] disabled:opacity-50"
+                >
+                  {submitAuthority.isPending ? "Submitting…" : "Submit for community verification"}
+                </button>
+                {submitAuthority.error && <p className="mt-2 text-xs text-red-600">{(submitAuthority.error as Error).message}</p>}
+              </>
+            ) : (
+              <p className="text-sm text-zinc-500">Resolve the incident through triage first; authority evidence is available from a verified or escalated report.</p>
+            )}
+            {pendingFollowUps.length > 0 && (
+              <div className="mt-4 space-y-3 border-t border-zinc-200 pt-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Pending community review</p>
+                {pendingFollowUps.map((item) => (
+                  <div key={item.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                    <p className="text-sm leading-relaxed text-zinc-800">{item.note}</p>
+                    {item.has_photo && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`${getApiBase()}/admin/resolution-evidence/${item.id}/photo?token=${getToken() ?? ""}`}
+                        alt="community follow-up"
+                        className="mt-2 max-h-40 w-full rounded-md object-cover"
+                      />
+                    )}
+                    <textarea
+                      value={reviewNotes[item.id] ?? ""}
+                      onChange={(e) => setReviewNotes((current) => ({ ...current, [item.id]: e.target.value }))}
+                      maxLength={2000}
+                      rows={2}
+                      placeholder="Review note (required when requesting more work)"
+                      className="mt-2 w-full rounded-md border border-amber-300 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-[#2a4a33]"
+                    />
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        disabled={reviewEvidence.isPending}
+                        onClick={() => reviewEvidence.mutate({ evidenceId: item.id, outcome: "confirmed" })}
+                        className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600 disabled:opacity-50"
+                      >
+                        Confirm resolution
+                      </button>
+                      <button
+                        disabled={reviewEvidence.isPending || !(reviewNotes[item.id] ?? "").trim()}
+                        onClick={() => reviewEvidence.mutate({ evidenceId: item.id, outcome: "needs_follow_up" })}
+                        className="rounded-md bg-white px-3 py-1.5 text-xs font-medium text-rose-700 ring-1 ring-inset ring-rose-300 hover:bg-rose-50 disabled:opacity-50"
+                      >
+                        Request more work
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {reviewEvidence.error && <p className="mt-2 text-xs text-red-600">{(reviewEvidence.error as Error).message}</p>}
+            {latestAuthority && data.status !== "awaiting_verification" && data.status !== "community_confirmed" && (
+              <p className="mt-3 text-xs text-zinc-500">Latest authority action is from {timeAgo(latestAuthority.created_at)}.</p>
+            )}
+          </Card>
+
+          <Card>
+            <div className="mb-3 flex items-center gap-2">
+              <SectionTitle>Resolution evidence</SectionTitle>
+              {resolutionEvidence.length > 0 && (
+                <span className="ml-auto text-xs text-zinc-400">
+                  {resolutionEvidence.length} item{resolutionEvidence.length === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
+            {resolutionEvidence.length === 0 ? (
+              <p className="text-sm text-zinc-500">No authority or community verification evidence yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {latestAuthority && (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100">
+                      <div className="border-b border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-600">
+                        Before — citizen report
+                      </div>
+                      {photoSrc ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={photoSrc} alt="Original citizen report" className="aspect-[4/3] w-full object-cover" />
+                      ) : (
+                        <div className="flex aspect-[4/3] items-center justify-center px-4 text-center text-xs text-zinc-500">
+                          No original report photo
+                        </div>
+                      )}
+                    </div>
+                    <div className="overflow-hidden rounded-lg border border-zinc-200 bg-zinc-100">
+                      <div className="border-b border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-600">
+                        After — authority evidence
+                      </div>
+                      {latestAuthority.has_photo ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={`${getApiBase()}/admin/resolution-evidence/${latestAuthority.id}/photo?token=${getToken() ?? ""}`}
+                          alt="Authority resolution evidence"
+                          className="aspect-[4/3] w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex aspect-[4/3] items-center justify-center px-4 text-center text-xs text-zinc-500">
+                          No authority after-photo
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {resolutionEvidence.map((item) => {
+                  const imageSrc = item.has_photo
+                    ? `${getApiBase()}/admin/resolution-evidence/${item.id}/photo?token=${getToken() ?? ""}`
+                    : null;
+                  const actor = item.evidence_type === "authority_resolution"
+                    ? whoName(item.submitted_by)
+                    : "Community member";
+                  return (
+                    <article key={item.id} className="rounded-lg border border-zinc-200 bg-zinc-50/60 p-3">
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <strong className="capitalize text-zinc-800">
+                          {item.evidence_type === "authority_resolution" ? "Authority action" : "Community follow-up"}
+                        </strong>
+                        <Badge value={item.review_outcome} />
+                        <span className="ml-auto text-zinc-400" title={new Date(item.created_at).toLocaleString()}>
+                          {actor} · {timeAgo(item.created_at)}
+                        </span>
+                      </div>
+                      <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700">{item.note}</p>
+                      {item.hotspot_snapshot_id && (
+                        <p className="mt-1 text-xs text-zinc-500">Hotspot snapshot: {item.hotspot_snapshot_id}</p>
+                      )}
+                      {imageSrc && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={imageSrc} alt="resolution evidence" className="mt-3 max-h-48 w-full rounded-lg bg-zinc-100 object-cover" />
+                      )}
+                      {item.review_note && item.review_outcome !== "pending" && (
+                        <p className="mt-2 border-t border-zinc-200 pt-2 text-xs text-zinc-600">Review: {item.review_note}</p>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+
+          <Card>
+            <SectionTitle>Resolution timeline</SectionTitle>
+            {resolutionTimeline.length === 0 ? (
+              <p className="text-sm text-zinc-500">No resolution events yet.</p>
+            ) : (
+              <ol className="relative space-y-3 border-l-2 border-zinc-200 pl-0 text-sm">
+                {resolutionTimeline.map((item) => (
+                  <li key={item.id} className="relative pl-5">
+                    <span aria-hidden className={`absolute -left-[7px] top-1 h-3 w-3 rounded-full ring-2 ring-white ${item.tone}`} />
+                    <p className="font-medium text-zinc-800">{item.label}</p>
+                    <p className="mt-0.5 whitespace-pre-wrap text-xs leading-relaxed text-zinc-600">{item.detail}</p>
+                    <p className="mt-0.5 text-[11px] text-zinc-400">
+                      {item.actor} · {timeAgo(item.at)}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </Card>
+
+          <Card>
             <SectionTitle>Location</SectionTitle>
             {hasCoords ? (
               <>
@@ -611,7 +901,6 @@ export default function IncidentDetailPage() {
                   ["verified", "Approve"],
                   ["rejected", "Reject"],
                   ["escalated", "Escalate"],
-                  ["resolved", "Resolve"],
                   ["closed", "Close"],
                 ] as const
               ).map(([status, label]) => {
