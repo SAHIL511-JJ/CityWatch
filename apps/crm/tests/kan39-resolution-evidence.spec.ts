@@ -91,6 +91,9 @@ test("staff can review a pending community follow-up", async ({ page }) => {
   await expect(page.getByText("After — authority evidence")).toBeVisible();
   await expect(page.getByText("Resolution timeline")).toBeVisible();
   await expect(page.getByText("The road is still flooded after rain.").first()).toBeVisible();
+  await page.getByRole("button", { name: "Open Community follow-up evidence photo fullscreen" }).click();
+  await expect(page.getByRole("dialog", { name: /Community follow-up evidence photo fullscreen/ })).toBeVisible();
+  await page.getByRole("button", { name: "Close fullscreen photo" }).click();
   await page.getByPlaceholder("Review note (required when requesting more work)").fill("Crew needs to inspect the outlet.");
   await page.getByRole("button", { name: "Request more work" }).click();
   await expect.poll(() => reviewPayload).toEqual({ outcome: "needs_follow_up", review_note: "Crew needs to inspect the outlet." });

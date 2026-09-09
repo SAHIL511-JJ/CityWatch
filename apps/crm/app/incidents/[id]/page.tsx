@@ -19,6 +19,45 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h2 className="mb-3 text-sm font-semibold tracking-wide text-zinc-500">{children}</h2>;
 }
 
+function FullscreenPhoto({
+  src,
+  alt,
+  onOpen,
+  onError,
+  onLoad,
+  buttonClassName = "",
+  imageClassName = "h-full w-full object-cover",
+}: {
+  src: string;
+  alt: string;
+  onOpen: () => void;
+  onError?: React.ReactEventHandler<HTMLImageElement>;
+  onLoad?: React.ReactEventHandler<HTMLImageElement>;
+  buttonClassName?: string;
+  imageClassName?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label={`Open ${alt} fullscreen`}
+      className={`group relative block w-full cursor-zoom-in overflow-hidden focus:outline-none focus:ring-2 focus:ring-[#2a4a33] ${buttonClassName}`}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={src} alt={alt} onError={onError} onLoad={onLoad} className={imageClassName} />
+      <span
+        aria-hidden
+        className="absolute inset-0 flex items-center justify-center gap-2 bg-black/0 text-sm font-medium text-white opacity-0 transition group-hover:bg-black/35 group-hover:opacity-100 group-focus-visible:bg-black/35 group-focus-visible:opacity-100"
+      >
+        <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5">
+          <path d="M12 3.5H16.5V8M16.5 3.5L11 9M8 16.5H3.5V12M3.5 16.5L9 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        Click to expand
+      </span>
+    </button>
+  );
+}
+
 function timeAgo(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
   const mins = Math.max(0, Math.floor(ms / 60000));
@@ -209,7 +248,7 @@ export default function IncidentDetailPage() {
   const [note, setNote] = useState("");
   const [severity, setSeverity] = useState<Severity | "">("");
   const [assignee, setAssignee] = useState("");
-  const [zoom, setZoom] = useState(false);
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   const [photoOk, setPhotoOk] = useState(true);
   const [confirming, setConfirming] = useState<"rejected" | "closed" | null>(null);
   const [reason, setReason] = useState("");
@@ -227,7 +266,7 @@ export default function IncidentDetailPage() {
     setNote("");
     setSeverity("");
     setAssignee("");
-    setZoom(false);
+    setLightbox(null);
     setPhotoOk(true);
     setConfirming(null);
     setReason("");
@@ -241,13 +280,13 @@ export default function IncidentDetailPage() {
 
   // Esc closes the lightbox
   useEffect(() => {
-    if (!zoom) return;
+    if (!lightbox) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setZoom(false);
+      if (e.key === "Escape") setLightbox(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [zoom]);
+  }, [lightbox]);
 
   // Toast auto-dismiss
   useEffect(() => {
@@ -509,31 +548,17 @@ export default function IncidentDetailPage() {
           <Card>
             <SectionTitle>Photo evidence</SectionTitle>
             {photoSrc && photoOk ? (
-              <button
-                onClick={() => setZoom(true)}
-                aria-label="Open photo fullscreen — click to expand"
-                className="group relative block w-full cursor-zoom-in overflow-hidden rounded-xl focus:outline-none focus:ring-2 focus:ring-[#2a4a33]"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={photoSrc}
-                  alt="incident photo"
-                  onError={() => setPhotoOk(false)}
-                  onLoad={(e) => {
-                    if (e.currentTarget.naturalWidth <= 8) setPhotoOk(false);
-                  }}
-                  className="aspect-[16/10] w-full bg-zinc-100 object-cover"
-                />
-                <span
-                  aria-hidden
-                  className="absolute inset-0 flex items-center justify-center gap-2 bg-black/0 text-sm font-medium text-white opacity-0 transition group-hover:bg-black/35 group-hover:opacity-100 group-focus-visible:bg-black/35 group-focus-visible:opacity-100"
-                >
-                  <svg viewBox="0 0 20 20" fill="none" className="h-5 w-5">
-                    <path d="M12 3.5H16.5V8M16.5 3.5L11 9M8 16.5H3.5V12M3.5 16.5L9 11" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                  Click to expand
-                </span>
-              </button>
+              <FullscreenPhoto
+                src={photoSrc}
+                alt="Incident photo"
+                onOpen={() => setLightbox({ src: photoSrc, alt: "Incident photo" })}
+                onError={() => setPhotoOk(false)}
+                onLoad={(e) => {
+                  if (e.currentTarget.naturalWidth <= 8) setPhotoOk(false);
+                }}
+                buttonClassName="rounded-xl"
+                imageClassName="aspect-[16/10] w-full bg-zinc-100 object-cover"
+              />
             ) : (
               <div className="flex aspect-[16/10] w-full flex-col items-center justify-center gap-2 rounded-xl bg-zinc-100 text-zinc-400">
                 <svg viewBox="0 0 24 24" fill="none" className="h-10 w-10" aria-hidden>
@@ -621,11 +646,17 @@ export default function IncidentDetailPage() {
                   <div key={item.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
                     <p className="text-sm leading-relaxed text-zinc-800">{item.note}</p>
                     {item.has_photo && (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
+                      <FullscreenPhoto
                         src={`${getApiBase()}/admin/resolution-evidence/${item.id}/photo?token=${getToken() ?? ""}`}
-                        alt="community follow-up"
-                        className="mt-2 max-h-40 w-full rounded-md object-cover"
+                        alt="Community follow-up photo"
+                        onOpen={() =>
+                          setLightbox({
+                            src: `${getApiBase()}/admin/resolution-evidence/${item.id}/photo?token=${getToken() ?? ""}`,
+                            alt: "Community follow-up photo",
+                          })
+                        }
+                        buttonClassName="mt-2 rounded-md"
+                        imageClassName="max-h-40 w-full rounded-md object-cover"
                       />
                     )}
                     <textarea
@@ -682,8 +713,12 @@ export default function IncidentDetailPage() {
                         Before — citizen report
                       </div>
                       {photoSrc ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={photoSrc} alt="Original citizen report" className="aspect-[4/3] w-full object-cover" />
+                        <FullscreenPhoto
+                          src={photoSrc}
+                          alt="Original citizen report"
+                          onOpen={() => setLightbox({ src: photoSrc, alt: "Original citizen report" })}
+                          imageClassName="aspect-[4/3] w-full object-cover"
+                        />
                       ) : (
                         <div className="flex aspect-[4/3] items-center justify-center px-4 text-center text-xs text-zinc-500">
                           No original report photo
@@ -695,11 +730,16 @@ export default function IncidentDetailPage() {
                         After — authority evidence
                       </div>
                       {latestAuthority.has_photo ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
+                        <FullscreenPhoto
                           src={`${getApiBase()}/admin/resolution-evidence/${latestAuthority.id}/photo?token=${getToken() ?? ""}`}
                           alt="Authority resolution evidence"
-                          className="aspect-[4/3] w-full object-cover"
+                          onOpen={() =>
+                            setLightbox({
+                              src: `${getApiBase()}/admin/resolution-evidence/${latestAuthority.id}/photo?token=${getToken() ?? ""}`,
+                              alt: "Authority resolution evidence",
+                            })
+                          }
+                          imageClassName="aspect-[4/3] w-full object-cover"
                         />
                       ) : (
                         <div className="flex aspect-[4/3] items-center justify-center px-4 text-center text-xs text-zinc-500">
@@ -732,8 +772,18 @@ export default function IncidentDetailPage() {
                         <p className="mt-1 text-xs text-zinc-500">Hotspot snapshot: {item.hotspot_snapshot_id}</p>
                       )}
                       {imageSrc && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={imageSrc} alt="resolution evidence" className="mt-3 max-h-48 w-full rounded-lg bg-zinc-100 object-cover" />
+                        <FullscreenPhoto
+                          src={imageSrc}
+                          alt={`${item.evidence_type === "authority_resolution" ? "Authority resolution" : "Community follow-up"} evidence photo`}
+                          onOpen={() =>
+                            setLightbox({
+                              src: imageSrc,
+                              alt: `${item.evidence_type === "authority_resolution" ? "Authority resolution" : "Community follow-up"} evidence photo`,
+                            })
+                          }
+                          buttonClassName="mt-3 rounded-lg bg-zinc-100"
+                          imageClassName="max-h-48 w-full rounded-lg object-cover"
+                        />
                       )}
                       {item.review_note && item.review_outcome !== "pending" && (
                         <p className="mt-2 border-t border-zinc-200 pt-2 text-xs text-zinc-600">Review: {item.review_note}</p>
@@ -1209,16 +1259,29 @@ export default function IncidentDetailPage() {
       </div>
 
       {/* Lightbox */}
-      {zoom && photoSrc && (
+      {lightbox && (
         <div
           className="fixed inset-0 z-50 flex cursor-zoom-out items-center justify-center bg-black/80 p-6"
-          onClick={() => setZoom(false)}
+          onClick={() => setLightbox(null)}
           role="dialog"
           aria-modal="true"
-          aria-label="Photo fullscreen — press Escape or click anywhere to close"
+          aria-label={`${lightbox.alt} fullscreen — press Escape or click anywhere to close`}
         >
+          <button
+            type="button"
+            onClick={() => setLightbox(null)}
+            aria-label="Close fullscreen photo"
+            className="absolute right-5 top-5 rounded-full bg-white/15 px-3 py-1 text-2xl leading-none text-white hover:bg-white/25 focus:outline-none focus:ring-2 focus:ring-white"
+          >
+            ×
+          </button>
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={photoSrc} alt="incident photo full" className="max-h-full max-w-full rounded-lg" />
+          <img
+            src={lightbox.src}
+            alt={`${lightbox.alt} full size`}
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-[calc(100vh-3rem)] max-w-[calc(100vw-3rem)] rounded-lg object-contain"
+          />
         </div>
       )}
 
