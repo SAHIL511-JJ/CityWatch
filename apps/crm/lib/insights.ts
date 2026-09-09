@@ -7,6 +7,8 @@ const DEFAULT_FILTERS: InsightsFilters = {
   radius_km: "0.75",
   category: "",
   severity: "",
+  trend: "",
+  status: "verified",
   bounds: null,
 };
 
@@ -58,6 +60,8 @@ export function readInsightsFilters(params: URLSearchParams): InsightsFilters {
     radius_km: params.get("radius_km") || DEFAULT_FILTERS.radius_km,
     category: params.get("category") || "",
     severity: params.get("severity") || "",
+    trend: ["rising", "stable", "declining", "isolated"].includes(params.get("trend") || "") ? params.get("trend")! : "",
+    status: ["all", "verified", "escalated", "resolved", "closed"].includes(params.get("status") || "") ? params.get("status")! : "verified",
     bounds: readBounds(params),
   };
 }
@@ -69,6 +73,8 @@ export function insightsQuery(filters: InsightsFilters, limit?: number): string 
     limit: limit ? String(limit) : undefined,
     category: filters.category || undefined,
     severity: filters.severity || undefined,
+    trend: filters.trend || undefined,
+    status: filters.status,
     min_lat: filters.bounds ? String(filters.bounds.min_lat) : undefined,
     min_lng: filters.bounds ? String(filters.bounds.min_lng) : undefined,
     max_lat: filters.bounds ? String(filters.bounds.max_lat) : undefined,

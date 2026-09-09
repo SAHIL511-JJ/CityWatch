@@ -1011,6 +1011,8 @@ def admin_insights(
     limit: int = Query(3, ge=1, le=50),
     category: str | None = Query(None),
     severity: str | None = Query(None),
+    trend: str | None = Query(None),
+    status: str = Query("verified"),
     center_lat: float | None = Query(None, ge=-90, le=90),
     center_lng: float | None = Query(None, ge=-180, le=180),
     min_lat: float | None = Query(None, ge=-90, le=90),
@@ -1021,6 +1023,10 @@ def admin_insights(
     db: Session = Depends(get_db),
 ):
     """Return one read-only snapshot for the CRM Insights workspace."""
+    if status not in {"all", "verified", "escalated", "resolved", "closed"}:
+        raise HTTPException(422, "invalid status")
+    if trend and trend not in {"rising", "stable", "declining", "isolated"}:
+        raise HTTPException(422, "invalid trend")
     if (center_lat is None) != (center_lng is None):
         raise HTTPException(422, "center_lat and center_lng must be provided together")
     bound_values = (min_lat, min_lng, max_lat, max_lng)
@@ -1045,7 +1051,9 @@ def admin_insights(
         center_lng=center_lng,
         category=category,
         severity=severity,
+        trend=trend,
         min_lat=min_lat,
+        status=status,
         min_lng=min_lng,
         max_lat=max_lat,
         max_lng=max_lng,

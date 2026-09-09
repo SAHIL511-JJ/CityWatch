@@ -30,6 +30,7 @@ def _query_rows(
     center_lng: float | None,
     category: str | None,
     severity: str | None,
+    status: str,
     min_lat: float | None,
     min_lng: float | None,
     max_lat: float | None,
@@ -38,9 +39,13 @@ def _query_rows(
     since = datetime.now(timezone.utc) - timedelta(days=window_days)
     q = (
         db.query(Incident)
-        .filter(Incident.status == "verified", Incident.created_at >= since)
+        .filter(Incident.created_at >= since)
         .order_by(Incident.created_at.asc(), Incident.id.asc())
     )
+    if status == "all":
+        q = q.filter(Incident.status.in_(("verified", "escalated", "resolved", "closed")))
+    else:
+        q = q.filter(Incident.status == status)
     if severity:
         q = q.filter(Incident.severity == severity)
     if min_lat is not None:
@@ -113,6 +118,8 @@ def build_insights(
     center_lng: float | None = None,
     category: str | None = None,
     severity: str | None = None,
+    trend: str | None = None,
+    status: str = "verified",
     min_lat: float | None = None,
     min_lng: float | None = None,
     max_lat: float | None = None,
@@ -127,6 +134,7 @@ def build_insights(
         center_lng=center_lng,
         category=category,
         severity=severity,
+        status=status,
         min_lat=min_lat,
         min_lng=min_lng,
         max_lat=max_lat,
@@ -142,6 +150,10 @@ def build_insights(
         narrative = _cluster_payload(group, now)
         narrative["action_plan"] = build_action_plan(narrative)
         narratives.append(narrative)
+    if trend:
+        narratives = [item for item in narratives if item["trend"] == trend]
+        matching_ids = {report_id for item in narratives for report_id in item["report_ids"]}
+        rows = [row for row in rows if str(row.id) in matching_ids]
     narratives.sort(key=lambda item: (-item["persistence_score"], item["category"], item["id"]))
     points = [
         {
@@ -174,6 +186,8 @@ def build_insights(
             else None,
             "category": category,
             "severity": severity,
+            "trend": trend,
+            "status": status,
         },
         "summary": _summary(rows, window_days),
         "narratives": narratives[: max(1, min(limit, 10))],

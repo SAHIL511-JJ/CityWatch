@@ -56,7 +56,7 @@ export function InsightActionPlan({ plan, compact = false }: { plan: InsightActi
       </div>
       {!compact && <div className="mt-5 border-t border-black/10 pt-4"><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Verify the outcome</p><p className="mt-1 text-sm leading-5 text-zinc-700">{plan.verify}</p></div>}
       {compact && <p className="mt-4 border-t border-zinc-200 pt-3 text-xs font-semibold text-[#2a4a33]">Route to {plan.authority} · full response brief on the evidence page</p>}
-      <p className="mt-4 text-[11px] leading-5 text-zinc-500">Read-only guidance based on the verified signal. Follow local safety procedures and operating standards.</p>
+      <p className="mt-4 text-[11px] leading-5 text-zinc-500">Read-only guidance based on the signal evidence. Follow local safety procedures and operating standards.</p>
     </section>
   );
 }

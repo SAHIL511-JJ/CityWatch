@@ -81,7 +81,7 @@ function FilterBar({
 }) {
   return (
     <section aria-label="Insight scope controls" className="rounded-2xl border border-[#dfe5dd] bg-white p-4 shadow-[0_8px_25px_rgba(20,35,26,0.05)] lg:p-5">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+      <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-end 2xl:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#55705c]">Scope</p>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -98,7 +98,7 @@ function FilterBar({
             ))}
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <label className="text-xs font-semibold text-zinc-600">
             Clustering radius
             <select value={filters.radius_km} onChange={(event) => onChange({ radius_km: event.target.value })} className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm font-normal text-zinc-800 outline-none transition focus:border-[#2a4a33] focus:ring-2 focus:ring-[#dce8dc]">
@@ -126,13 +126,33 @@ function FilterBar({
               <option value="low">Low</option>
             </select>
           </label>
+          <label className="text-xs font-semibold text-zinc-600">
+            Trend
+            <select value={filters.trend} onChange={(event) => onChange({ trend: event.target.value })} className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm font-normal text-zinc-800 outline-none transition focus:border-[#2a4a33] focus:ring-2 focus:ring-[#dce8dc]">
+              <option value="">All trends</option>
+              <option value="rising">Rising</option>
+              <option value="stable">Stable</option>
+              <option value="declining">Declining</option>
+              <option value="isolated">Isolated</option>
+            </select>
+          </label>
+          <label className="text-xs font-semibold text-zinc-600">
+            Report status
+            <select value={filters.status} onChange={(event) => onChange({ status: event.target.value })} className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm font-normal text-zinc-800 outline-none transition focus:border-[#2a4a33] focus:ring-2 focus:ring-[#dce8dc]">
+              <option value="all">All operational</option>
+              <option value="verified">Verified</option>
+              <option value="escalated">Escalated</option>
+              <option value="resolved">Resolved</option>
+              <option value="closed">Closed</option>
+            </select>
+          </label>
         </div>
         <button type="button" onClick={onRefresh} disabled={refreshing} className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#14231a] px-4 py-2.5 text-sm font-semibold text-white transition duration-200 hover:bg-[#285e4a] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2 active:translate-y-px disabled:cursor-wait disabled:opacity-60">
           <span aria-hidden>{refreshing ? "○" : "↻"}</span>{refreshing ? "Refreshing" : "Refresh data"}
         </button>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-zinc-100 pt-3 text-xs text-zinc-500">
-        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#2a4a33]" />Verified, high-confidence evidence only</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#2a4a33]" />High-confidence evidence · {filters.status === "all" ? "all operational statuses" : `${filters.status} reports`}</span>
         <span className="text-zinc-300">·</span>
         {filters.bounds ? <><span>Map area applied</span><button type="button" onClick={() => onChange({ bounds: null })} className="font-semibold text-[#2a4a33] underline-offset-2 hover:underline">Clear map area</button></> : <span>Move the map to narrow the area</span>}
         {mapUpdating && <span className="inline-flex items-center gap-1.5 text-[#2a4a33]"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#2a4a33]" />Updating map area</span>}
@@ -246,7 +266,7 @@ function AnalyticsPageContent() {
 
       {insights.isLoading ? <div className="grid gap-5 lg:grid-cols-[minmax(0,1.55fr)_360px]"><Skeleton className="h-[600px]" /><Skeleton className="h-[600px]" /></div> : insights.error ? <Card className="border-red-200 bg-red-50 p-10 text-center"><p className="text-sm font-semibold text-red-700">Insights could not load from the operations API.</p><button type="button" onClick={() => insights.refetch()} className="mt-4 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white">Retry</button></Card> : <>
         <section className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Insight summary">
-          <Card className="border-[#dfe5dd] p-4"><Metric label="Verified reports" value={data?.summary.total ?? 0} tone="green" /></Card>
+          <Card className="border-[#dfe5dd] p-4"><Metric label="Matching reports" value={data?.summary.total ?? 0} tone="green" /></Card>
           <Card className="border-[#dfe5dd] p-4"><Metric label="Recurring signals" value={data?.signal_count ?? 0} /></Card>
           <Card className="border-[#dfe5dd] p-4"><Metric label="Visible on map" value={visiblePoints.length} /></Card>
           <Card className="border-[#dfe5dd] p-4"><Metric label="Window" value={`${filters.window_days} days`} /></Card>
@@ -265,7 +285,7 @@ function AnalyticsPageContent() {
         </section>
 
         <section className="grid gap-5 lg:grid-cols-[1.25fr_.75fr]">
-          <Card className="border-[#dfe5dd] p-5"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#55705c]">Reporting rhythm</p><h2 className="mt-2 text-xl font-bold tracking-[-0.02em] text-[#14231a]">Activity in scope</h2></div><span className="rounded-md bg-[#eef3ed] px-2.5 py-1 text-xs font-semibold text-[#2a4a33]">{data?.summary.total ?? 0} verified</span></div><p className="mt-2 text-sm text-zinc-500">Daily reporting volume across the selected window.</p><div className="mt-5 h-56"><ResponsiveContainer width="100%" height="100%"><AreaChart data={chartData} margin={{ top: 8, right: 4, left: -22, bottom: 0 }}><defs><linearGradient id="insightFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#2a4a33" stopOpacity={0.26} /><stop offset="100%" stopColor="#2a4a33" stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke="#e4e9e2" /><XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" /><YAxis allowDecimals={false} tick={{ fontSize: 10 }} /><Tooltip /><Area type="monotone" dataKey="count" stroke="#2a4a33" strokeWidth={2.5} fill="url(#insightFill)" /></AreaChart></ResponsiveContainer></div></Card>
+          <Card className="border-[#dfe5dd] p-5"><div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#55705c]">Reporting rhythm</p><h2 className="mt-2 text-xl font-bold tracking-[-0.02em] text-[#14231a]">Activity in scope</h2></div><span className="rounded-md bg-[#eef3ed] px-2.5 py-1 text-xs font-semibold text-[#2a4a33]">{data?.summary.total ?? 0} reports</span></div><p className="mt-2 text-sm text-zinc-500">Daily reporting volume across the selected window.</p><div className="mt-5 h-56"><ResponsiveContainer width="100%" height="100%"><AreaChart data={chartData} margin={{ top: 8, right: 4, left: -22, bottom: 0 }}><defs><linearGradient id="insightFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#2a4a33" stopOpacity={0.26} /><stop offset="100%" stopColor="#2a4a33" stopOpacity={0.02} /></linearGradient></defs><CartesianGrid strokeDasharray="3 3" stroke="#e4e9e2" /><XAxis dataKey="label" tick={{ fontSize: 10 }} interval="preserveStartEnd" /><YAxis allowDecimals={false} tick={{ fontSize: 10 }} /><Tooltip /><Area type="monotone" dataKey="count" stroke="#2a4a33" strokeWidth={2.5} fill="url(#insightFill)" /></AreaChart></ResponsiveContainer></div></Card>
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-1"><Card className="border-[#dfe5dd] p-5"><div className="flex items-start justify-between"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#55705c]">Category mix</p><h2 className="mt-2 text-xl font-bold tracking-[-0.02em] text-[#14231a]">What is being reported</h2></div><span className="text-xs text-zinc-500">{data?.signal_count ?? 0} signals</span></div><div className="mt-4 h-40"><ResponsiveContainer width="100%" height="100%"><BarChart data={categories.map((item) => ({ ...item, label: categoryLabel(item.name) }))} layout="vertical" margin={{ top: 0, right: 18, left: 0, bottom: 0 }}><CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e4e9e2" /><XAxis type="number" allowDecimals={false} tick={{ fontSize: 10 }} /><YAxis type="category" dataKey="label" width={118} tick={{ fontSize: 10 }} /><Tooltip /><Bar dataKey="count" radius={[0, 5, 5, 0]}>{categories.map((item, index) => <Cell key={item.name} fill={CATEGORY_COLORS[index % CATEGORY_COLORS.length]} />)}</Bar></BarChart></ResponsiveContainer></div></Card><Card className="border-[#dfe5dd] p-5"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#55705c]">Severity mix</p><div className="mt-4 space-y-3">{(data?.summary.by_severity ?? []).map((item) => { const total = data?.summary.total || 1; return <div key={item.severity}><div className="mb-1 flex justify-between text-xs"><span className="font-semibold capitalize text-zinc-700">{item.severity}</span><span className="tabular-nums text-zinc-500">{item.count} · {Math.round((item.count / total) * 100)}%</span></div><div className="h-2 overflow-hidden rounded-full bg-zinc-100"><div className="h-full rounded-full transition-all duration-300" style={{ width: `${(item.count / total) * 100}%`, backgroundColor: SEVERITY_COLORS[item.severity] ?? "#71717a" }} /></div></div>; })}</div></Card></div>
         </section>
 

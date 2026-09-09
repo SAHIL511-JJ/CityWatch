@@ -77,6 +77,8 @@ export interface InsightsFilters {
   radius_km: string;
   category: string;
   severity: string;
+  trend: string;
+  status: string;
   bounds: InsightBounds | null;
 }
 
@@ -89,6 +91,8 @@ export interface InsightsSnapshot {
     bounds: InsightBounds | null;
     category: string | null;
     severity: string | null;
+    trend: string | null;
+    status: string;
   };
   summary: {
     total: number;
