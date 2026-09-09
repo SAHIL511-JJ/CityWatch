@@ -22,12 +22,39 @@ from .auth import (
     create_token,
     get_current_staff,
     get_current_user,
+    get_verified_current_user,
     new_code,
     store_code,
 )
 from .config import settings
 from .db import SessionLocal, get_db
-from .models import Category, Incident, IncidentNote, Staff, StatusHistory, User
+from .models import (
+    Category,
+    Incident,
+    IncidentNote,
+    ResolutionEvidence,
+    Staff,
+    StatusHistory,
+    User,
+)
+from .resolution_evidence import (
+    AUTHORITY_START_STATUSES,
+    OPERATIONAL_STATUSES,
+    RESOLUTION_STATUSES,
+    add_status_history,
+    build_public_resolution,
+    clean_hotspot_snapshot_id,
+    clean_note,
+    clean_optional_note,
+    current_pending_follow_up,
+    latest_authority_evidence,
+    ordered_evidence,
+    private_evidence_out,
+    public_evidence_out,
+    public_history_out,
+    resolution_incident_out,
+    upload_evidence_photo,
+)
 from .storage import get_storage
 from .taxonomy import (
     canonical_category,
@@ -45,6 +72,14 @@ app.add_middleware(
 )
 
 ALLOWED_TYPES = {"image/jpeg": ".jpg", "image/png": ".png"}
+TRIAGE_STATUSES = {
+    "processing",
+    "needs_review",
+    "verified",
+    "rejected",
+    "escalated",
+    "closed",
+}
 
 
 # ---------- schemas ----------
@@ -119,6 +154,42 @@ def incident_out(i: Incident) -> dict:
         "assigned_to": str(i.assigned_to) if i.assigned_to else None,
         "created_at": i.created_at.isoformat() if i.created_at else None,
     }
+
+
+def public_incident_out(i: Incident) -> dict:
+    """Return only verified public incident fields; never expose private IDs."""
+
+    out = incident_out(i)
+    out.pop("reporter_id", None)
+    out.pop("assigned_to", None)
+    return out
+
+
+def _resolution_history(db: Session, incident_id: str) -> list[StatusHistory]:
+    return (
+        db.query(StatusHistory)
+        .filter_by(incident_id=incident_id)
+        .order_by(StatusHistory.changed_at.asc(), StatusHistory.id.asc())
+        .all()
+    )
+
+
+def _resolution_photo_redirect(photo_url: str | None):
+    """Return a short-lived redirect for a private evidence object."""
+    from fastapi.responses import RedirectResponse
+
+    if not photo_url:
+        raise HTTPException(404, "photo unavailable")
+    key = photo_url.replace("\\", "/").strip()
+    if not key.startswith(f"{settings.STORAGE_BUCKET}/"):
+        raise HTTPException(404, "photo unavailable")
+    if not settings.SUPABASE_SERVICE_KEY:
+        raise HTTPException(404, "photo unavailable")
+    try:
+        url = get_storage().signed_url(key.split("/", 1)[1])
+    except Exception as exc:
+        raise HTTPException(502, f"photo unavailable: {exc}") from exc
+    return RedirectResponse(url, status_code=302)
 
 
 def enqueue_analysis(incident_id: str) -> bool:
@@ -350,7 +421,7 @@ def list_incidents(
         if lat is not None and lng is not None:
             if haversine_km(lat, lng, i.lat, i.lng) > radius_km:
                 continue
-        out.append(incident_out(i))
+        out.append(public_incident_out(i))
         if len(out) >= limit:
             break
     return out
@@ -361,9 +432,133 @@ def list_incidents(
 @app.get("/incidents/{incident_id}")
 def get_incident(incident_id: str, db: Session = Depends(get_db)):
     i = db.get(Incident, incident_id)
-    if i is None:
+    if i is None or i.status != "verified":
         raise HTTPException(404, "not found")
-    return incident_out(i)
+    return public_incident_out(i)
+
+
+@app.get("/incidents/{incident_id}/resolution")
+def get_incident_resolution(
+    incident_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return the safe resolution timeline for an incident with evidence."""
+    incident = db.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(404, "not found")
+    if latest_authority_evidence(db, incident.id) is None:
+        raise HTTPException(404, "resolution not found")
+    evidence = ordered_evidence(db, incident.id)
+    history = _resolution_history(db, incident.id)
+    authority = latest_authority_evidence(db, incident.id)
+    can_submit = bool(
+        user.verified
+        and incident.status == "awaiting_verification"
+        and authority is not None
+        and current_pending_follow_up(db, incident.id, authority.id, user.id) is None
+    )
+    return build_public_resolution(
+        incident, evidence, history, can_submit_follow_up=can_submit
+    )
+
+
+@app.get("/resolution-evidence/{evidence_id}/photo")
+def citizen_resolution_photo(
+    evidence_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    evidence = db.get(ResolutionEvidence, evidence_id)
+    if evidence is None or not evidence.photo_url:
+        raise HTTPException(404, "photo unavailable")
+    if latest_authority_evidence(db, evidence.incident_id) is None:
+        raise HTTPException(404, "photo unavailable")
+    return _resolution_photo_redirect(evidence.photo_url)
+
+
+@app.post("/incidents/{incident_id}/resolution-evidence", status_code=201)
+def submit_citizen_resolution_evidence(
+    incident_id: str,
+    observation: str = Form(...),
+    photo: UploadFile | None = File(None),
+    user: User = Depends(get_verified_current_user),
+    db: Session = Depends(get_db),
+):
+    incident = (
+        db.query(Incident).filter(Incident.id == incident_id).with_for_update().first()
+    )
+    if incident is None:
+        raise HTTPException(404, "not found")
+    authority = latest_authority_evidence(db, incident.id)
+    if authority is None:
+        raise HTTPException(404, "resolution not found")
+    if incident.status != "awaiting_verification":
+        raise HTTPException(409, "incident is not awaiting verification")
+    if current_pending_follow_up(db, incident.id, authority.id, user.id) is not None:
+        raise HTTPException(409, "follow-up already pending")
+    note = clean_note(observation, "observation")
+    from uuid import uuid4
+
+    evidence_id = str(uuid4())
+    photo_url = upload_evidence_photo(incident.id, evidence_id, photo)
+    evidence = ResolutionEvidence(
+        id=evidence_id,
+        incident_id=incident.id,
+        parent_evidence_id=authority.id,
+        evidence_type="community_follow_up",
+        submitted_by=user.id,
+        note=note,
+        photo_url=photo_url,
+        review_outcome="pending",
+    )
+    db.add(evidence)
+    try:
+        db.commit()
+        db.refresh(evidence)
+    except Exception as exc:
+        db.rollback()
+        print(f"[resolution-evidence] orphaned upload after commit failure: {photo_url}")
+        raise HTTPException(502, "could not save resolution evidence") from exc
+    return public_evidence_out(evidence)
+
+
+@app.get("/me/incidents/{incident_id}")
+def get_my_incident(
+    incident_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    incident = db.get(Incident, incident_id)
+    if incident is None or incident.reporter_id != user.id:
+        raise HTTPException(404, "not found")
+    evidence = ordered_evidence(db, incident.id)
+    history = _resolution_history(db, incident.id)
+    authority = latest_authority_evidence(db, incident.id)
+    resolution = (
+        build_public_resolution(
+            incident,
+            evidence,
+            history,
+            can_submit_follow_up=bool(
+                user.verified
+                and incident.status == "awaiting_verification"
+                and authority is not None
+                and current_pending_follow_up(db, incident.id, authority.id, user.id)
+                is None
+            ),
+        )
+        if authority is not None
+        else None
+    )
+    out = {
+        "incident": resolution_incident_out(incident),
+        "evidence": [public_evidence_out(item) for item in evidence],
+        "history": [public_history_out(item) for item in history],
+    }
+    if resolution is not None:
+        out["resolution"] = resolution
+    return out
 
 
 @app.get("/incidents/{incident_id}/photo")
@@ -420,6 +615,12 @@ def admin_patch(
         raise HTTPException(404, "not found")
     old = i.status
     if body.status:
+        if body.status not in TRIAGE_STATUSES:
+            if body.status in RESOLUTION_STATUSES or body.status == "resolved":
+                raise HTTPException(
+                    409, "use the resolution evidence workflow for this status"
+                )
+            raise HTTPException(422, "bad status")
         i.status = body.status
     if body.severity:
         i.severity = body.severity
@@ -477,7 +678,7 @@ def admin_staff(
             db.query(func.count())
             .filter(
                 Incident.assigned_to == s.id,
-                Incident.status.notin_(["resolved", "closed"]),
+                Incident.status.notin_(["resolved", "community_confirmed", "closed"]),
             )
             .scalar()
         )
@@ -673,7 +874,6 @@ BULK_STATUS = {
     "verified",
     "rejected",
     "escalated",
-    "resolved",
     "closed",
 }
 BULK_SEVERITY = {"low", "medium", "high", "critical"}
@@ -809,6 +1009,8 @@ def admin_analyze(
     i = db.get(Incident, incident_id)
     if i is None:
         raise HTTPException(404, "not found")
+    if i.status in RESOLUTION_STATUSES or i.status == "community_confirmed":
+        raise HTTPException(409, "use the resolution evidence workflow for this status")
     res = run_ai(i.title or "", i.description or "", i.photo_url)
     status = apply_ai_result(db, i, res, changed_by=staff.id)
     return {"id": str(i.id), "status": status, "ai": res}
@@ -870,7 +1072,146 @@ def admin_get(
         }
         for h in hist
     ]
+    out["resolution_evidence"] = [
+        private_evidence_out(item) for item in ordered_evidence(db, i.id)
+    ]
     return out
+
+
+@app.post("/admin/incidents/{incident_id}/resolution-evidence", status_code=201)
+def submit_authority_resolution_evidence(
+    incident_id: str,
+    action_taken: str = Form(...),
+    hotspot_snapshot_id: str | None = Form(None),
+    photo: UploadFile | None = File(None),
+    staff: Staff = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+):
+    # Lock the incident for the state check so two operators cannot start the
+    # same authority cycle concurrently.
+    incident = (
+        db.query(Incident).filter(Incident.id == incident_id).with_for_update().first()
+    )
+    if incident is None:
+        raise HTTPException(404, "not found")
+    if incident.status == "awaiting_verification":
+        raise HTTPException(409, "authority resolution already awaiting verification")
+    if incident.status not in AUTHORITY_START_STATUSES:
+        raise HTTPException(409, "incident is not eligible for authority resolution")
+    note = clean_note(action_taken, "action_taken")
+    snapshot = clean_hotspot_snapshot_id(hotspot_snapshot_id)
+    from uuid import uuid4
+
+    evidence_id = str(uuid4())
+    photo_url = upload_evidence_photo(incident.id, evidence_id, photo)
+    evidence = ResolutionEvidence(
+        id=evidence_id,
+        incident_id=incident.id,
+        evidence_type="authority_resolution",
+        submitted_by=staff.id,
+        hotspot_snapshot_id=snapshot,
+        note=note,
+        photo_url=photo_url,
+        review_outcome="not_applicable",
+    )
+    db.add(evidence)
+    add_status_history(db, incident, "awaiting_verification", staff.id)
+    try:
+        db.commit()
+        db.refresh(incident)
+        db.refresh(evidence)
+    except Exception as exc:
+        db.rollback()
+        print(f"[resolution-evidence] orphaned upload after commit failure: {photo_url}")
+        raise HTTPException(502, "could not save resolution evidence") from exc
+    return {"incident": incident_out(incident), "evidence": private_evidence_out(evidence)}
+
+
+@app.get("/admin/incidents/{incident_id}/resolution-evidence")
+def list_authority_resolution_evidence(
+    incident_id: str,
+    staff: Staff = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+):
+    if db.get(Incident, incident_id) is None:
+        raise HTTPException(404, "not found")
+    return [private_evidence_out(item) for item in ordered_evidence(db, incident_id)]
+
+
+@app.get("/admin/resolution-evidence/{evidence_id}/photo")
+def admin_resolution_photo(
+    evidence_id: str,
+    token: str | None = Query(None),
+    request: Request = None,  # type: ignore
+    db: Session = Depends(get_db),
+):
+    """Serve a private resolution photo using the CRM's image-token pattern."""
+    raw = token
+    if not raw and request is not None:
+        hdr = request.headers.get("authorization", "")
+        if hdr.lower().startswith("bearer "):
+            raw = hdr[7:]
+    if not raw:
+        raise HTTPException(401, "missing bearer token")
+    try:
+        claims = auth.decode_token(raw)
+    except HTTPException:
+        raise HTTPException(401, "invalid token")
+    if "role" not in claims:
+        raise HTTPException(403, "staff only")
+    if db.get(Staff, claims.get("sub")) is None:
+        raise HTTPException(401, "unknown staff")
+    evidence = db.get(ResolutionEvidence, evidence_id)
+    if evidence is None:
+        raise HTTPException(404, "photo unavailable")
+    return _resolution_photo_redirect(evidence.photo_url)
+
+
+@app.patch("/admin/resolution-evidence/{evidence_id}")
+def review_resolution_evidence(
+    evidence_id: str,
+    body: ResolutionReviewIn,
+    staff: Staff = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+):
+    if body.outcome not in {"confirmed", "needs_follow_up"}:
+        raise HTTPException(422, "outcome must be confirmed or needs_follow_up")
+    review_note = clean_optional_note(body.review_note, "review_note")
+    if body.outcome == "needs_follow_up" and review_note is None:
+        raise HTTPException(400, "review_note is required for needs_follow_up")
+    evidence = (
+        db.query(ResolutionEvidence)
+        .filter(ResolutionEvidence.id == evidence_id)
+        .with_for_update()
+        .first()
+    )
+    if evidence is None:
+        raise HTTPException(404, "not found")
+    incident = (
+        db.query(Incident).filter(Incident.id == evidence.incident_id).with_for_update().first()
+    )
+    if incident is None:
+        raise HTTPException(404, "not found")
+    if evidence.evidence_type != "community_follow_up" or evidence.review_outcome != "pending":
+        raise HTTPException(409, "evidence is no longer pending")
+    if incident.status != "awaiting_verification":
+        raise HTTPException(409, "incident is no longer awaiting verification")
+    evidence.review_outcome = body.outcome
+    evidence.review_note = review_note
+    evidence.reviewed_by = staff.id
+    evidence.reviewed_at = datetime.utcnow()
+    new_status = (
+        "community_confirmed" if body.outcome == "confirmed" else "needs_follow_up"
+    )
+    add_status_history(db, incident, new_status, staff.id)
+    try:
+        db.commit()
+        db.refresh(incident)
+        db.refresh(evidence)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(502, "could not save resolution review") from exc
+    return {"incident": incident_out(incident), "evidence": private_evidence_out(evidence)}
 
 
 @app.get("/admin/incidents/{incident_id}/photo")
@@ -944,7 +1285,15 @@ def analytics(staff: Staff = Depends(get_current_staff), db: Session = Depends(g
         .group_by(func.date(Incident.created_at), Incident.severity)
         .all()
     )
-    open_statuses = {"processing", "needs_review", "verified", "escalated"}
+    open_statuses = {
+        "processing",
+        "needs_review",
+        "verified",
+        "escalated",
+        "awaiting_verification",
+        "needs_follow_up",
+    }
+    resolved_statuses = {"resolved", "community_confirmed"}
     per_day: dict = {}
     for d, c in by_day_raw:
         per_day[str(d)] = {
@@ -959,7 +1308,7 @@ def analytics(staff: Staff = Depends(get_current_staff), db: Session = Depends(g
         entry = per_day.setdefault(
             key, {"date": key, "count": 0, "resolved": 0, "open": 0, "critical": 0}
         )
-        if str(s) == "resolved":
+        if str(s) in resolved_statuses:
             entry["resolved"] = int(c)
         if str(s) in open_statuses:
             entry["open"] = int(entry["open"]) + int(c)
@@ -1023,7 +1372,7 @@ def admin_insights(
     db: Session = Depends(get_db),
 ):
     """Return one read-only snapshot for the CRM Insights workspace."""
-    if status not in {"all", "verified", "escalated", "resolved", "closed"}:
+    if status not in {"all", *OPERATIONAL_STATUSES}:
         raise HTTPException(422, "invalid status")
     if trend and trend not in {"rising", "stable", "declining", "isolated"}:
         raise HTTPException(422, "invalid trend")

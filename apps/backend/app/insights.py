@@ -18,6 +18,7 @@ from .hotspots import (
     _utc,
 )
 from .models import Incident
+from .resolution_evidence import OPERATIONAL_STATUSES
 from .taxonomy import canonical_category
 
 
@@ -43,7 +44,7 @@ def _query_rows(
         .order_by(Incident.created_at.asc(), Incident.id.asc())
     )
     if status == "all":
-        q = q.filter(Incident.status.in_(("verified", "escalated", "resolved", "closed")))
+        q = q.filter(Incident.status.in_(tuple(sorted(OPERATIONAL_STATUSES))))
     else:
         q = q.filter(Incident.status == status)
     if severity:

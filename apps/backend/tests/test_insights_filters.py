@@ -53,7 +53,10 @@ class InsightsFilterTests(unittest.TestCase):
                                       compile_kwargs={"literal_binds": True}))
                                for call in query.filter.call_args_list for expression in call.args)
                 if status == "all":
-                    self.assertIn("status IN ('verified', 'escalated', 'resolved', 'closed')", sql)
+                    self.assertIn(
+                        "status IN ('awaiting_verification', 'closed', 'community_confirmed', 'escalated', 'needs_follow_up', 'resolved', 'verified')",
+                        sql,
+                    )
                 else:
                     self.assertIn(f"status = '{status}'", sql)
                 self.assertEqual(rows, [high])

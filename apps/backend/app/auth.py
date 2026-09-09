@@ -122,11 +122,29 @@ def current_token(
 def get_current_user(
     token: dict = Depends(current_token), db: Session = Depends(get_db)
 ) -> User:
+    if "role" in token:
+        raise HTTPException(status_code=403, detail="citizen only")
     u = db.get(User, token.get("sub"))
     if u is None:
         raise HTTPException(status_code=401, detail="unknown user")
     if getattr(u, "banned", False):
         raise HTTPException(status_code=403, detail="account banned")
+    return u
+
+
+def get_verified_current_user(
+    token: dict = Depends(current_token), db: Session = Depends(get_db)
+) -> User:
+    """Require a citizen JWT whose account has completed verification."""
+    if "role" in token:
+        raise HTTPException(status_code=403, detail="citizen only")
+    u = db.get(User, token.get("sub"))
+    if u is None:
+        raise HTTPException(status_code=401, detail="unknown user")
+    if getattr(u, "banned", False):
+        raise HTTPException(status_code=403, detail="account banned")
+    if not u.verified:
+        raise HTTPException(status_code=403, detail="verify your account first")
     return u
 
 

@@ -94,3 +94,24 @@ class StatusHistory(Base):
     new_status: Mapped[str] = mapped_column(Text)
     changed_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     changed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ResolutionEvidence(Base):
+    __tablename__ = "resolution_evidence"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    incident_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("incidents.id", ondelete="CASCADE"), index=True
+    )
+    parent_evidence_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("resolution_evidence.id", ondelete="CASCADE"), nullable=True
+    )
+    hotspot_snapshot_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_type: Mapped[str] = mapped_column(Text)
+    submitted_by: Mapped[str] = mapped_column(String(36))
+    note: Mapped[str] = mapped_column(Text)
+    photo_url: Mapped[str] = mapped_column(Text)
+    review_outcome: Mapped[str] = mapped_column(Text, default="pending")
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
