@@ -1,19 +1,25 @@
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../api_client.dart';
-import '../auth_provider.dart';
 import '../cw_theme.dart';
-import 'verify_screen.dart';
+
+enum ResolutionScreenSource { owner, community }
 
 class ResolutionDetailScreen extends ConsumerStatefulWidget {
-  const ResolutionDetailScreen({super.key, required this.incidentId});
+  const ResolutionDetailScreen({
+    super.key,
+    required this.incidentId,
+    this.source = ResolutionScreenSource.owner,
+  });
 
   final String incidentId;
+  final ResolutionScreenSource source;
 
   @override
   ConsumerState<ResolutionDetailScreen> createState() =>
@@ -25,12 +31,24 @@ class _ResolutionDetailScreenState
   late Future<Map<String, dynamic>> _future;
   final _observation = TextEditingController();
   XFile? _selectedPhoto;
+  Future<Uint8List>? _selectedPhotoBytes;
+  bool _pickingPhoto = false;
   bool _submitting = false;
+
+  bool get _isCommunity =>
+      widget.source == ResolutionScreenSource.community;
+
+  Future<Map<String, dynamic>> _load() {
+    final api = ref.read(apiClientProvider);
+    return _isCommunity
+        ? api.fetchResolution(widget.incidentId)
+        : api.fetchMyIncident(widget.incidentId);
+  }
 
   @override
   void initState() {
     super.initState();
-    _future = ref.read(apiClientProvider).fetchMyIncident(widget.incidentId);
+    _future = _load();
   }
 
   @override
@@ -41,27 +59,40 @@ class _ResolutionDetailScreenState
 
   void _reload() {
     setState(() {
-      _future = ref.read(apiClientProvider).fetchMyIncident(widget.incidentId);
+      _future = _load();
     });
   }
 
   String _label(String value) => value.replaceAll('_', ' ');
 
   Future<void> _pickPhoto(ImageSource source) async {
-    final picked = await ImagePicker().pickImage(source: source);
-    if (picked != null && mounted) setState(() => _selectedPhoto = picked);
+    if (_pickingPhoto || _submitting) return;
+    setState(() => _pickingPhoto = true);
+    try {
+      final picked = await ImagePicker().pickImage(source: source);
+      if (picked != null && mounted) {
+        setState(() {
+          _selectedPhoto = picked;
+          _selectedPhotoBytes = picked.readAsBytes();
+        });
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            kIsWeb
+                ? 'Chrome could not open the photo picker. Please try Gallery again.'
+                : 'Could not open the photo picker. Please try again.',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _pickingPhoto = false);
+    }
   }
 
   Future<void> _submitFollowUp() async {
-    final auth = ref.read(authProvider);
-    if (!auth.verified) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content:
-                Text('Verify your account before submitting a follow-up.')),
-      );
-      return;
-    }
     if (_observation.text.trim().isEmpty || _selectedPhoto == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Add an observation and a photo first.')),
@@ -75,8 +106,12 @@ class _ResolutionDetailScreenState
             observation: _observation.text.trim(),
             photo: _selectedPhoto!,
           );
+      if (!mounted) return;
       _observation.clear();
-      setState(() => _selectedPhoto = null);
+      setState(() {
+        _selectedPhoto = null;
+        _selectedPhotoBytes = null;
+      });
       _reload();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -87,11 +122,14 @@ class _ResolutionDetailScreenState
     } on DioException catch (error) {
       final code = error.response?.statusCode;
       final message = code == 403
-          ? 'Verify your account before submitting a follow-up.'
-          : code == 409
-              ? 'A follow-up is already waiting for this resolution.'
-              : 'Could not submit the follow-up. Please try again.';
+          ? 'This session cannot submit follow-up evidence.'
+          : code == 404
+              ? 'This resolution is no longer available.'
+              : code == 409
+                  ? 'A community follow-up is awaiting staff review.'
+                  : 'Could not submit the follow-up. Please try again.';
       if (mounted) {
+        if (code == 409) _reload();
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(message)));
       }
@@ -201,39 +239,11 @@ class _ResolutionDetailScreenState
     required bool hasPending,
   }) {
     if (!awaiting) return const SizedBox.shrink();
-    final verified = ref.watch(authProvider).verified;
-    if (!verified) {
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: CwColors.paper,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: CwColors.sand),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('Verify your account to submit follow-up evidence',
-                style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 6),
-            const Text(
-                'You can read this resolution timeline now. Verification is required before sharing a current observation.'),
-            const SizedBox(height: 12),
-            OutlinedButton(
-              onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const VerifyScreen()),
-              ),
-              child: const Text('Verify account'),
-            ),
-          ],
-        ),
-      );
-    }
     if (!canSubmit) {
       return hasPending
           ? const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
-              child: Text('Your follow-up is waiting for staff review.'),
+              child: Text('A community follow-up is awaiting staff review.'),
             )
           : const SizedBox.shrink();
     }
@@ -266,7 +276,9 @@ class _ResolutionDetailScreenState
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed:
-                      _submitting ? null : () => _pickPhoto(ImageSource.camera),
+                      _submitting || _pickingPhoto
+                          ? null
+                          : () => _pickPhoto(ImageSource.camera),
                   icon: const Icon(Icons.camera_alt_outlined),
                   label: const Text('Camera'),
                 ),
@@ -274,7 +286,7 @@ class _ResolutionDetailScreenState
               const SizedBox(width: 8),
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: _submitting
+                  onPressed: _submitting || _pickingPhoto
                       ? null
                       : () => _pickPhoto(ImageSource.gallery),
                   icon: const Icon(Icons.photo_library_outlined),
@@ -283,14 +295,32 @@ class _ResolutionDetailScreenState
               ),
             ],
           ),
-          if (_selectedPhoto != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text('Photo selected: ${_selectedPhoto!.name}'),
+          if (_selectedPhoto != null) ...[
+            const SizedBox(height: 10),
+            FutureBuilder<Uint8List>(
+              future: _selectedPhotoBytes,
+              builder: (context, snapshot) {
+                final bytes = snapshot.data;
+                if (bytes == null || bytes.isEmpty) {
+                  return Text('Photo selected: ${_selectedPhoto!.name}');
+                }
+                return ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: Image.memory(
+                    bytes,
+                    height: 170,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Text(
+                        'Photo selected: ${_selectedPhoto!.name}'),
+                  ),
+                );
+              },
             ),
+          ],
           const SizedBox(height: 8),
           FilledButton(
-            onPressed: _submitting || !verified ? null : _submitFollowUp,
+            onPressed: _submitting ? null : _submitFollowUp,
             child: Text(_submitting ? 'Submitting…' : 'Submit follow-up'),
           ),
         ],
@@ -301,7 +331,8 @@ class _ResolutionDetailScreenState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Report progress')),
+      appBar: AppBar(
+          title: Text(_isCommunity ? 'Verify resolution' : 'Report progress')),
       body: FutureBuilder<Map<String, dynamic>>(
         future: _future,
         builder: (context, snapshot) {
@@ -313,7 +344,7 @@ class _ResolutionDetailScreenState
               child: Padding(
                 padding: EdgeInsets.all(24),
                 child: Text(
-                  'This report is not available on this account.',
+                  'This resolution is not available right now.',
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -330,9 +361,9 @@ class _ResolutionDetailScreenState
               .toList();
           final resolution = raw['resolution'] is Map
               ? Map<String, dynamic>.from(raw['resolution'] as Map)
-              : null;
+              : raw;
           final awaiting = incident.status == 'awaiting_verification';
-          final canSubmit = resolution?['can_submit_follow_up'] == true;
+          final canSubmit = resolution['can_submit_follow_up'] == true;
           final hasPending = evidence.any((item) =>
               item.evidenceType == 'community_follow_up' &&
               item.reviewOutcome == 'pending');

@@ -1,18 +1,21 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../api_client.dart';
 import '../cw_theme.dart';
 import '../feed_filters.dart';
 import '../taxonomy.dart';
+import 'hotspot_detail_screen.dart';
+import 'incident_detail_screen.dart';
 
 enum _FeedState { loading, denied, failed, offline, empty, ready }
+
+enum _HotspotState { idle, loading, failed, empty, ready }
 
 String _timeAgo(String? iso) {
   if (iso == null || iso.isEmpty) return '';
@@ -42,7 +45,9 @@ class FeedScreen extends ConsumerStatefulWidget {
 
 class _FeedScreenState extends ConsumerState<FeedScreen> {
   List<IncidentItem> _items = [];
+  List<HotspotItem> _hotspots = [];
   _FeedState _state = _FeedState.loading;
+  _HotspotState _hotspotState = _HotspotState.idle;
   Position? _pos;
   DateTime? _posAt;
   bool _manualPos = false;
@@ -71,6 +76,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   Future<void> _refresh() async {
     setState(() {
       _state = _FeedState.loading;
+      _hotspotState = _HotspotState.loading;
     });
     final usingManualPosition = _manualPos && _pos != null;
     late final Position pos;
@@ -81,39 +87,65 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
         pos = await _locate();
       } on _Denied {
         if (!mounted) return;
-        setState(() => _state = _FeedState.denied);
+        setState(() {
+          _state = _FeedState.denied;
+          _hotspotState = _HotspotState.idle;
+        });
         return;
       } on TimeoutException {
         if (!mounted) return;
         setState(() {
           _state = _FeedState.failed;
+          _hotspotState = _HotspotState.idle;
         });
         return;
       } catch (e) {
         if (!mounted) return;
         setState(() {
           _state = _FeedState.failed;
+          _hotspotState = _HotspotState.idle;
         });
         return;
       }
     }
+    await _loadAtPosition(pos, usingManualPosition: usingManualPosition);
+  }
+
+  Future<void> _loadAtPosition(
+    Position pos, {
+    required bool usingManualPosition,
+  }) async {
+    final api = ref.read(apiClientProvider);
+    final severity = ref.read(severityFilterProvider);
+    final category = ref.read(categoryFilterProvider);
+    if (!mounted) return;
+    setState(() {
+      _pos = pos;
+      _posAt = DateTime.now();
+      _manualPos = usingManualPosition;
+      _state = _FeedState.loading;
+      _hotspotState = _HotspotState.loading;
+    });
+
+    final feedFuture = api.fetchFeed(
+      lat: pos.latitude,
+      lng: pos.longitude,
+      radiusKm: ref.read(radiusKmProvider),
+      severity: severity.isEmpty ? null : severity,
+      category: category.isEmpty ? null : category,
+    );
+    final hotspotsFuture = api.fetchHotspots(
+      lat: pos.latitude,
+      lng: pos.longitude,
+      radiusKm: ref.read(radiusKmProvider),
+      category: category.isEmpty ? null : category,
+      severity: severity.isEmpty ? null : severity,
+    );
+
     try {
-      final items = await ref.read(apiClientProvider).fetchFeed(
-            lat: pos.latitude,
-            lng: pos.longitude,
-            radiusKm: ref.read(radiusKmProvider),
-            severity: ref.read(severityFilterProvider).isEmpty
-                ? null
-                : ref.read(severityFilterProvider),
-            category: ref.read(categoryFilterProvider).isEmpty
-                ? null
-                : ref.read(categoryFilterProvider),
-          );
+      final items = await feedFuture;
       if (!mounted) return;
       setState(() {
-        _pos = pos;
-        _posAt = DateTime.now();
-        _manualPos = usingManualPosition;
         _items = items;
         _state = items.isEmpty ? _FeedState.empty : _FeedState.ready;
       });
@@ -123,15 +155,24 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
           e.type == DioExceptionType.connectionTimeout ||
           e.type == DioExceptionType.unknown;
       setState(() {
-        _pos = pos;
-        _posAt = DateTime.now();
         _state = offline ? _FeedState.offline : _FeedState.failed;
       });
-    } catch (e) {
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _state = _FeedState.failed);
+    }
+
+    try {
+      final hotspots = await hotspotsFuture;
       if (!mounted) return;
       setState(() {
-        _state = _FeedState.failed;
+        _hotspots = hotspots;
+        _hotspotState =
+            hotspots.isEmpty ? _HotspotState.empty : _HotspotState.ready;
       });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _hotspotState = _HotspotState.failed);
     }
   }
 
@@ -203,29 +244,10 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
       _posAt = DateTime.now();
       _state = _FeedState.loading;
     });
-    try {
-      final items = await ref.read(apiClientProvider).fetchFeed(
-            lat: lat,
-            lng: lng,
-            radiusKm: ref.read(radiusKmProvider),
-          );
-      if (!mounted) return;
-      setState(() {
-        _items = items;
-        _state = items.isEmpty ? _FeedState.empty : _FeedState.ready;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _state = _FeedState.failed;
-      });
-    }
-  }
-
-  Future<void> _openInMaps(IncidentItem e) async {
-    final url = Uri.parse(
-        'https://www.google.com/maps/search/?api=1&query=${e.lat},${e.lng}');
-    await launchUrl(url, mode: LaunchMode.externalApplication);
+    await _loadAtPosition(
+      _pos!,
+      usingManualPosition: true,
+    );
   }
 
   @override
@@ -326,6 +348,7 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
             ),
             SliverToBoxAdapter(child: _filterBar(radius, severity, category)),
             SliverToBoxAdapter(child: _gpsStrip()),
+            SliverToBoxAdapter(child: _hotspotSection()),
             if (_state == _FeedState.ready) ...[
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
@@ -558,6 +581,203 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
     );
   }
 
+  Widget _hotspotSection() {
+    if (_pos == null || _hotspotState == _HotspotState.idle) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'AWARENESS',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: CwColors.pine,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.5,
+                          ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text('Recurring near you',
+                        style: Theme.of(context).textTheme.titleLarge),
+                  ],
+                ),
+              ),
+              if (_hotspotState == _HotspotState.ready)
+                Flexible(
+                  child: Text(
+                      '${_hotspots.length} signal${_hotspots.length == 1 ? '' : 's'}',
+                      textAlign: TextAlign.right,
+                      style: Theme.of(context).textTheme.bodySmall),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          switch (_hotspotState) {
+            _HotspotState.loading => _hotspotLoading(),
+            _HotspotState.failed => _hotspotMessage(
+                'Signals are taking a moment',
+                'We could not load recurring conditions. Your nearby reports are still available.',
+                OutlinedButton(
+                  onPressed: _refresh,
+                  child: const Text('Retry signals'),
+                ),
+              ),
+            _HotspotState.empty => _hotspotMessage(
+                'No recurring signals yet',
+                'There are no verified patterns near this location. You can still share what you see.',
+                const SizedBox.shrink(),
+              ),
+            _HotspotState.ready => Column(
+                children: _hotspots
+                    .take(4)
+                    .map((hotspot) => Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: _hotspotCard(hotspot),
+                        ))
+                    .toList(),
+              ),
+            _HotspotState.idle => const SizedBox.shrink(),
+          },
+        ],
+      ),
+    );
+  }
+
+  Widget _hotspotLoading() {
+    return Column(
+      children: [
+        for (var i = 0; i < 2; i++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(height: 14, width: 150, color: CwColors.mint),
+                    const SizedBox(height: 10),
+                    Container(
+                        height: 12,
+                        width: double.infinity,
+                        color: CwColors.cream),
+                    const SizedBox(height: 7),
+                    Container(height: 12, width: 220, color: CwColors.cream),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _hotspotMessage(String title, String message, Widget action) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 5),
+            Text(message, style: Theme.of(context).textTheme.bodySmall),
+            if (action is! SizedBox) ...[
+              const SizedBox(height: 10),
+              action,
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _hotspotCard(HotspotItem hotspot) {
+    final trendColor =
+        hotspot.trend == 'rising' ? CwColors.amber : CwColors.pine;
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => HotspotDetailScreen(
+              hotspot: hotspot,
+              onReport: () {
+                Navigator.of(context).pop();
+                widget.onReport?.call();
+              },
+            ),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(11),
+                decoration: BoxDecoration(
+                  color: CwColors.mint,
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: Icon(
+                  _categoryIcon(hotspot.category),
+                  color: CwColors.pine,
+                  size: 23,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            environmentalCategoryLabel(hotspot.category),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                        _chip(hotspot.trendLabel, trendColor, Colors.white),
+                      ],
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      '${hotspot.reportCount} observation${hotspot.reportCount == 1 ? '' : 's'} · ${hotspot.meanDistanceKm.toStringAsFixed(2)} km spread',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      hotspot.explanation,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Icon(Icons.arrow_forward_ios_rounded,
+                  size: 15, color: CwColors.pine),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _body() {
     switch (_state) {
       case _FeedState.loading:
@@ -698,7 +918,15 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
               Positioned(
                 bottom: 14,
                 right: 14,
-                child: _chip('✓ Verified', CwColors.paper, CwColors.pine),
+                child: _chip(
+                  e.status == 'awaiting_verification'
+                      ? 'Needs community verification'
+                      : 'Verified',
+                  e.status == 'awaiting_verification'
+                      ? const Color(0xFFFFF0C2)
+                      : CwColors.paper,
+                  CwColors.pine,
+                ),
               ),
             ]),
             Padding(
@@ -803,132 +1031,17 @@ class _FeedScreenState extends ConsumerState<FeedScreen> {
   }
 
   void _showDetail(IncidentItem e) {
-    final api = ref.read(apiClientProvider);
     final dist = _pos == null
         ? ''
         : _distance(_pos!.latitude, _pos!.longitude, e.lat, e.lng);
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (context) => Scaffold(
-        appBar: AppBar(title: const Text('Neighborhood report')),
-        body: Center(
-            child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 760),
-                child: ListView(
-                  padding: const EdgeInsets.all(20),
-                  children: [
-                    FutureBuilder<List<int>?>(
-                      future: _photos.putIfAbsent(
-                          e.id, () => api.fetchPhotoBytes(e.id)),
-                      builder: (context, snap) {
-                        if (!ApiClient.hasRealPhoto(snap.data)) {
-                          return Container(
-                            height: 160,
-                            color: Colors.grey.shade200,
-                            child:
-                                const Center(child: Text('Photo unavailable')),
-                          );
-                        }
-                        if (snap.connectionState == ConnectionState.waiting) {
-                          return Container(
-                              height: 160, color: Colors.grey.shade200);
-                        }
-                        return ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Image.memory(Uint8List.fromList(snap.data!),
-                              height: 220, fit: BoxFit.cover),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        _chip((e.severity ?? 'low').toUpperCase(),
-                            severityColor(e.severity), Colors.white),
-                        const SizedBox(width: 8),
-                        _chip('VERIFIED', Colors.green.shade700, Colors.white),
-                      ],
-                    ),
-                    if (e.category != null) ...[
-                      const SizedBox(height: 10),
-                      _chip(environmentalCategoryLabel(e.category!),
-                          CwColors.mint, CwColors.pine),
-                    ],
-                    const SizedBox(height: 8),
-                    Text(e.title,
-                        style: Theme.of(context).textTheme.headlineSmall),
-                    const SizedBox(height: 4),
-                    Text(
-                      [_timeAgo(e.createdAt), dist]
-                          .where((s) => s.isNotEmpty)
-                          .join(' · '),
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(e.description),
-                    if (e.aiReason != null && e.aiReason!.isNotEmpty) ...[
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: CwColors.mint.withValues(alpha: .55),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Icon(Icons.auto_awesome_outlined,
-                                size: 18, color: CwColors.pine),
-                            const SizedBox(width: 9),
-                            Expanded(
-                              child: Text(
-                                'Why it was classified: ${e.aiReason}',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    Text(
-                      e.address != null && e.address!.isNotEmpty
-                          ? e.address!
-                          : '${e.lat.toStringAsFixed(5)}, ${e.lng.toStringAsFixed(5)}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                    if (e.address != null && e.address!.isNotEmpty)
-                      Text(
-                          '${e.lat.toStringAsFixed(5)}, ${e.lng.toStringAsFixed(5)}',
-                          style: Theme.of(context).textTheme.bodySmall),
-                    const SizedBox(height: 16),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        FilledButton.icon(
-                          onPressed: () => _openInMaps(e),
-                          icon: const Icon(Icons.map_outlined),
-                          label: const Text('Open in Google Maps'),
-                        ),
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            Clipboard.setData(ClipboardData(
-                                text:
-                                    'https://www.google.com/maps/search/?api=1&query=${e.lat},${e.lng}'));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                  content: Text('Location link copied.')),
-                            );
-                          },
-                          icon: const Icon(Icons.link),
-                          label: const Text('Copy link'),
-                        ),
-                      ],
-                    ),
-                  ],
-                ))),
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => IncidentDetailScreen(
+          incident: e,
+          distanceLabel: dist,
+        ),
       ),
-    ));
+    );
   }
 
   Widget _chip(String label, Color bg, Color fg) {

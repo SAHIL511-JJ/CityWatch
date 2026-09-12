@@ -121,14 +121,13 @@ def latest_authority_evidence(
 
 
 def current_pending_follow_up(
-    db: Session, incident_id: str, parent_evidence_id: str, user_id: str
+    db: Session, incident_id: str, parent_evidence_id: str
 ) -> ResolutionEvidence | None:
     return (
         db.query(ResolutionEvidence)
         .filter(
             ResolutionEvidence.incident_id == incident_id,
             ResolutionEvidence.parent_evidence_id == parent_evidence_id,
-            ResolutionEvidence.submitted_by == user_id,
             ResolutionEvidence.evidence_type == "community_follow_up",
             ResolutionEvidence.review_outcome == "pending",
         )

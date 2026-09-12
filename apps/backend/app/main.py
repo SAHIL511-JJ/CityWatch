@@ -22,7 +22,6 @@ from .auth import (
     create_token,
     get_current_staff,
     get_current_user,
-    get_verified_current_user,
     new_code,
     store_code,
 )
@@ -82,6 +81,7 @@ TRIAGE_STATUSES = {
     "closed",
 }
 VALID_INCIDENT_STATUSES = TRIAGE_STATUSES | RESOLUTION_STATUSES | {"resolved"}
+PUBLIC_CITIZEN_INCIDENT_STATUSES = {"verified", "awaiting_verification"}
 TERMINAL_INCIDENT_STATUSES = {"resolved", "community_confirmed", "closed"}
 INCIDENT_QUEUES = {"mine", "unassigned"}
 INCIDENT_SORTS = {"newest", "oldest", "severity", "action"}
@@ -269,7 +269,7 @@ def incident_out(i: Incident) -> dict:
 
 
 def public_incident_out(i: Incident) -> dict:
-    """Return only verified public incident fields; never expose private IDs."""
+    """Return public incident fields; never expose private IDs."""
 
     out = incident_out(i)
     out.pop("reporter_id", None)
@@ -519,8 +519,8 @@ def list_incidents(
     limit: int = Query(50, le=200),
     db: Session = Depends(get_db),
 ):
-    # Public feed = verified only (per contract).
-    q = db.query(Incident).filter(Incident.status == "verified")
+    # Public feed exposes active incidents plus resolutions awaiting community review.
+    q = db.query(Incident).filter(Incident.status.in_(PUBLIC_CITIZEN_INCIDENT_STATUSES))
     if severity:
         q = q.filter(Incident.severity == severity)
     # Category lives inside ai_analysis for the Supabase-backed MVP; normalize legacy
@@ -544,7 +544,7 @@ def list_incidents(
 @app.get("/incidents/{incident_id}")
 def get_incident(incident_id: str, db: Session = Depends(get_db)):
     i = db.get(Incident, incident_id)
-    if i is None or i.status != "verified":
+    if i is None or i.status not in PUBLIC_CITIZEN_INCIDENT_STATUSES:
         raise HTTPException(404, "not found")
     return public_incident_out(i)
 
@@ -565,10 +565,9 @@ def get_incident_resolution(
     history = _resolution_history(db, incident.id)
     authority = latest_authority_evidence(db, incident.id)
     can_submit = bool(
-        user.verified
-        and incident.status == "awaiting_verification"
+        incident.status == "awaiting_verification"
         and authority is not None
-        and current_pending_follow_up(db, incident.id, authority.id, user.id) is None
+        and current_pending_follow_up(db, incident.id, authority.id) is None
     )
     return build_public_resolution(
         incident, evidence, history, can_submit_follow_up=can_submit
@@ -594,7 +593,7 @@ def submit_citizen_resolution_evidence(
     incident_id: str,
     observation: str = Form(...),
     photo: UploadFile | None = File(None),
-    user: User = Depends(get_verified_current_user),
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     incident = (
@@ -607,7 +606,7 @@ def submit_citizen_resolution_evidence(
         raise HTTPException(404, "resolution not found")
     if incident.status != "awaiting_verification":
         raise HTTPException(409, "incident is not awaiting verification")
-    if current_pending_follow_up(db, incident.id, authority.id, user.id) is not None:
+    if current_pending_follow_up(db, incident.id, authority.id) is not None:
         raise HTTPException(409, "follow-up already pending")
     note = clean_note(observation, "observation")
     from uuid import uuid4
@@ -653,11 +652,9 @@ def get_my_incident(
             evidence,
             history,
             can_submit_follow_up=bool(
-                user.verified
-                and incident.status == "awaiting_verification"
+                incident.status == "awaiting_verification"
                 and authority is not None
-                and current_pending_follow_up(db, incident.id, authority.id, user.id)
-                is None
+                and current_pending_follow_up(db, incident.id, authority.id) is None
             ),
         )
         if authority is not None
@@ -675,11 +672,15 @@ def get_my_incident(
 
 @app.get("/incidents/{incident_id}/photo")
 def public_photo(incident_id: str, db: Session = Depends(get_db)):
-    """Public reels-feed photo. Verified incidents only, no auth."""
+    """Public reels-feed photo for active and awaiting-verification incidents."""
     from fastapi.responses import RedirectResponse
 
     i = db.get(Incident, incident_id)
-    if i is None or not i.photo_url or i.status != "verified":
+    if (
+        i is None
+        or not i.photo_url
+        or i.status not in PUBLIC_CITIZEN_INCIDENT_STATUSES
+    ):
         raise HTTPException(404, "no photo")
     key = i.photo_url.replace("\\", "/").strip()
     if key.startswith(f"{settings.STORAGE_BUCKET}/"):

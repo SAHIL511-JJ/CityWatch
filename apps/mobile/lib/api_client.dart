@@ -306,7 +306,7 @@ class ApiClient {
     return res.data ?? <String, dynamic>{};
   }
 
-  /// GET /incidents?lat&lng&radius_km&severity&category — verified only.
+  /// GET /incidents?lat&lng&radius_km&severity&category — public active reports.
   Future<List<IncidentItem>> fetchFeed({
     required double lat,
     required double lng,
@@ -330,8 +330,11 @@ class ApiClient {
     return list
         .whereType<Map<String, dynamic>>()
         .map(IncidentItem.fromJson)
-        // Client-side guard: feed shows verified only.
-        .where((e) => e.status == null || e.status == 'verified')
+        // Keep the client aligned with the backend's public status contract.
+        .where((e) =>
+            e.status == null ||
+            e.status == 'verified' ||
+            e.status == 'awaiting_verification')
         .toList();
   }
 
@@ -384,6 +387,17 @@ class ApiClient {
     return res.data ?? <String, dynamic>{};
   }
 
+  /// Public resolution timeline. A missing authority resolution is normal for
+  /// most public incidents, so callers can treat a 404 as no timeline.
+  Future<Map<String, dynamic>?> fetchResolutionIfAvailable(String id) async {
+    try {
+      return await fetchResolution(id);
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) return null;
+      rethrow;
+    }
+  }
+
   Future<Map<String, dynamic>> submitResolutionFollowUp({
     required String incidentId,
     required String observation,
@@ -416,7 +430,7 @@ class ApiClient {
     }
   }
 
-  /// Public photo URL for reels cards. Backend serves verified only, else 404.
+  /// Public photo URL for reels cards and awaiting-verification reports.
   String photoUrlFor(String id) {
     return '${AppConfig.baseUrl}/incidents/$id/photo';
   }
