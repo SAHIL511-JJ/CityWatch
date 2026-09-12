@@ -4,10 +4,13 @@ import Link from "next/link";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
-import type { AdminIncidentPage, AnalyticsSummary, Hotspot, Incident } from "@/lib/types";
+import type { AdminIncidentPage, AnalyticsSummary, Hotspot } from "@/lib/types";
+import { DEFAULT_FILTERS, signalHref } from "@/lib/insights";
+import { incidentHref } from "@/lib/incident-scope";
 import { categoryLabel } from "@/lib/taxonomy";
-import { slaFor } from "@/lib/sla";
 import { Card } from "@/components/ui/card";
+import { FeedbackPanel } from "@/components/ui/feedback-panel";
+import { PageHeader } from "@/components/ui/page-header";
 import {
   Area,
   AreaChart,
@@ -68,19 +71,27 @@ function Kpi({
   label,
   value,
   sub,
+  definition,
   spark,
   accent,
+  href,
 }: {
   label: string;
   value: string | number;
   sub: string;
+  definition: string;
   spark: { date: string; count: number }[];
   accent: string;
+  href: string;
 }) {
   // Always draw the sparkline — a single day renders flat with a tooltip note.
   const single = spark.length < 2;
   return (
-    <Card className="relative overflow-hidden p-5">
+    <Link
+      href={href}
+      className="group relative block overflow-hidden rounded-lg border border-zinc-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2"
+      aria-label={`${label}: ${value}. ${definition}. Open matching incidents.`}
+    >
       <span className="absolute inset-y-0 left-0 w-1" style={{ background: accent }} />
       <p className="text-xs font-semibold uppercase tracking-wider text-zinc-500">{label}</p>
       <div className="mt-1 flex items-end justify-between gap-3">
@@ -103,7 +114,91 @@ function Kpi({
         </div>
       </div>
       <p className="mt-1 text-xs text-zinc-500">{sub}</p>
-    </Card>
+      <p className="mt-3 border-t border-zinc-100 pt-2 text-[11px] leading-5 text-zinc-500 group-hover:text-zinc-700">{definition}</p>
+      <span className="mt-2 inline-flex text-xs font-semibold text-[#285e4a]">Open matching incidents →</span>
+    </Link>
+  );
+}
+
+type ActionCounts = AnalyticsSummary["action_counts"];
+
+const EMPTY_ACTION_COUNTS: ActionCounts = {
+  overdue: 0,
+  breaching: 0,
+  needs_review: 0,
+  escalated: 0,
+  needs_follow_up: 0,
+};
+
+function ActionPanel({ action }: { action: ActionCounts }) {
+  const hasAction = action.overdue + action.breaching + action.needs_review + action.escalated + action.needs_follow_up > 0;
+  const items = [
+    {
+      label: "Overdue",
+      value: action.overdue,
+      detail: "Past the response budget",
+      href: incidentHref({ window_days: 30, state: "needs_attention", sla: "overdue", sort: "action" }),
+      tone: "border-red-200 bg-red-50 text-red-900",
+    },
+    {
+      label: "Needs review",
+      value: action.needs_review,
+      detail: "Waiting for staff triage",
+      href: incidentHref({ window_days: 30, status: "needs_review", sort: "action" }),
+      tone: "border-amber-200 bg-amber-50 text-amber-950",
+    },
+    {
+      label: "Escalated",
+      value: action.escalated,
+      detail: "Requires authority attention",
+      href: incidentHref({ window_days: 30, status: "escalated", sort: "action" }),
+      tone: "border-purple-200 bg-purple-50 text-purple-950",
+    },
+  ];
+
+  return (
+    <section aria-labelledby="needs-action-heading" className="rounded-xl border border-[#b8ccb9] bg-[#f1f6ef] p-5 shadow-[0_8px_25px_rgba(20,35,26,0.06)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#55705c]">Operator priority</p>
+          <h2 id="needs-action-heading" className="mt-1 text-xl font-bold tracking-[-0.02em] text-[#14231a]">Needs action</h2>
+          <p className="mt-1 max-w-[62ch] text-sm leading-6 text-zinc-600">Open work in the last 30 calendar days, ordered for the next response.</p>
+        </div>
+        <Link href={incidentHref({ window_days: 30, state: "needs_attention", sort: "action" })} className="rounded-md bg-[#14231a] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#2a4a33] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Open full queue →</Link>
+      </div>
+      {!hasAction ? (
+        <p className="mt-4 rounded-lg border border-[#cbdacb] bg-white/70 px-4 py-3 text-sm text-[#285e4a]">No incident needs immediate action in this window.</p>
+      ) : (
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          {items.map((item) => (
+            <Link key={item.label} href={item.href} className={`rounded-lg border p-4 transition hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2 ${item.tone}`}>
+              <div className="flex items-start justify-between gap-3"><span className="text-sm font-semibold">{item.label}</span><span className="text-3xl font-bold tabular-nums">{item.value}</span></div>
+              <p className="mt-2 text-xs opacity-80">{item.detail}</p>
+              <span className="mt-3 inline-flex text-xs font-semibold underline-offset-2 hover:underline">Open scoped queue →</span>
+            </Link>
+          ))}
+        </div>
+      )}
+      {(action.breaching > 0 || action.needs_follow_up > 0) && (
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-[#cbdacb] pt-3 text-xs text-zinc-600">
+          {action.breaching > 0 && <Link href={incidentHref({ window_days: 30, state: "needs_attention", sla: "breaching", sort: "action" })} className="font-semibold text-amber-800 underline-offset-2 hover:underline">{action.breaching} breaching SLA</Link>}
+          {action.needs_follow_up > 0 && <Link href={incidentHref({ window_days: 30, status: "needs_follow_up", sort: "action" })} className="font-semibold text-rose-800 underline-offset-2 hover:underline">{action.needs_follow_up} need follow-up</Link>}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function SignalRow({ signal }: { signal: Hotspot }) {
+  return (
+    <li className="grid gap-3 border-t border-zinc-100 py-3 first:border-t-0 lg:grid-cols-[minmax(8rem,1.25fr)_minmax(7rem,1fr)_4rem_5rem_6.5rem_auto] lg:items-center">
+      <div className="min-w-0"><p className="truncate text-sm font-semibold text-[#14231a]">{categoryLabel(signal.category)}</p><p className="mt-0.5 text-xs text-zinc-500">Recurring signal</p></div>
+      <div><p className="text-sm font-semibold text-[#285e4a]">{signal.persistence_score} score</p><p className="text-xs capitalize text-zinc-500">{signal.trend} trend</p></div>
+      <div><p className="text-[10px] uppercase tracking-wide text-zinc-400 lg:hidden">Reports</p><p className="text-sm font-semibold tabular-nums text-zinc-800">{signal.report_count}</p></div>
+      <div><p className="text-[10px] uppercase tracking-wide text-zinc-400 lg:hidden">Contributors</p><p className="text-sm font-semibold tabular-nums text-zinc-800">{signal.unique_contributors}</p></div>
+      <div><p className="text-[10px] uppercase tracking-wide text-zinc-400 lg:hidden">Last observed</p><p className="text-xs text-zinc-600">{new Date(signal.last_observed).toLocaleDateString([], { month: "short", day: "numeric" })}</p></div>
+      <Link href={signalHref(signal.id, { ...DEFAULT_FILTERS, window_days: 30 })} className="text-xs font-semibold text-[#285e4a] underline-offset-2 hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Open evidence →</Link>
+    </li>
   );
 }
 
@@ -111,21 +206,21 @@ export default function DashboardPage() {
   const [activeCat, setActiveCat] = useState<number | null>(null);
   const summary = useQuery({
     queryKey: ["admin-summary"],
-    queryFn: () => apiFetch<AnalyticsSummary>("/admin/analytics/summary"),
+    queryFn: () => apiFetch<AnalyticsSummary>("/admin/analytics/summary?window_days=30"),
   });
   const recent = useQuery({
     queryKey: ["admin-recent"],
-    queryFn: () => apiFetch<AdminIncidentPage>("/admin/incidents"),
+    queryFn: () => apiFetch<AdminIncidentPage>("/admin/incidents?window_days=30&page_size=6"),
   });
   const hotspots = useQuery({
     queryKey: ["admin-hotspots"],
-    queryFn: () => apiFetch<Hotspot[]>("/admin/analytics/hotspots?limit=6"),
+    queryFn: () => apiFetch<Hotspot[]>("/admin/analytics/hotspots?limit=6&window_days=30"),
     retry: false,
   });
 
   if (summary.isLoading) {
     return (
-      <div className="space-y-4" style={FONT}>
+      <div className="mx-auto max-w-[1500px] space-y-6 pb-10" style={FONT}>
         <div>
           <Skeleton className="h-7 w-56" />
           <Skeleton className="mt-2 h-4 w-80" />
@@ -145,16 +240,12 @@ export default function DashboardPage() {
 
   if (summary.error) {
     return (
-      <Card className="border-red-200 bg-red-50 p-6" style={FONT}>
-        <p className="font-semibold text-red-800">Dashboard failed to load</p>
-        <p className="mt-1 text-sm text-red-700">{(summary.error as Error).message}</p>
-        <button
-          onClick={() => summary.refetch()}
-          className="mt-3 rounded-md bg-[#14231a] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#2a4a33]"
-        >
-          Retry
-        </button>
-      </Card>
+      <FeedbackPanel
+        variant="error"
+        title="Dashboard failed to load"
+        description={(summary.error as Error).message}
+        action={<button onClick={() => summary.refetch()} className="rounded-md bg-[#14231a] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[#2a4a33] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Retry</button>}
+      />
     );
   }
 
@@ -181,20 +272,6 @@ export default function DashboardPage() {
   const feed = incidents.slice(0, 6);
   const queue = incidents.filter((i) => i.status === "needs_review" || i.status === "escalated").slice(0, 5);
 
-  const sla = (() => {
-    let overdue = 0;
-    let breaching = 0;
-    let oldest: Incident | null = null;
-    for (const i of incidents) {
-      const s = slaFor(i.created_at, i.severity, i.status);
-      if (!s || s.state === "ok") continue;
-      if (s.state === "overdue") overdue++;
-      else breaching++;
-      if (!oldest || new Date(i.created_at) < new Date(oldest.created_at)) oldest = i;
-    }
-    return { overdue, breaching, oldest };
-  })();
-
   const todayCount = byDay.length > 0 ? byDay[byDay.length - 1].count : 0;
   const prevCount = byDay.length > 1 ? byDay[byDay.length - 2].count : null;
   const delta =
@@ -214,60 +291,21 @@ export default function DashboardPage() {
   const activeEntry = activeCat !== null ? byCat[activeCat] : undefined;
 
   return (
-    <div className="space-y-5" style={FONT}>
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-[#14231a]">Command overview</h1>
-          <p className="mt-0.5 text-sm text-zinc-500">
-            {total} incidents on record · {weekTotal} in the last {Math.min(7, byDay.length) || 0} reported day{Math.min(7, byDay.length) === 1 ? "" : "s"}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-60" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-600" />
-            </span>
-            Live from operations API
-          </span>
-          <Link href="/incidents" className="rounded-md bg-[#14231a] px-3 py-1.5 font-medium text-white hover:bg-[#2a4a33]">
-            Review queue
-          </Link>
-        </div>
-      </div>
+    <div className="mx-auto max-w-[1500px] space-y-6 pb-10" style={FONT}>
+      <PageHeader
+        eyebrow="Authority operations"
+        title="Command overview"
+        description={`${total} incidents in the last 30 calendar days · ${weekTotal} reports across active reporting days.`}
+        meta={<span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800"><span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500 opacity-60" /><span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-600" /></span>Live from operations API</span>}
+      />
 
-      {(sla.overdue > 0 || sla.breaching > 0) && (
-        <div
-          role="alert"
-          className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-4 py-2.5 text-sm ${
-            sla.overdue > 0
-              ? "border-red-300 bg-red-50 text-red-800"
-              : "border-amber-300 bg-amber-50 text-amber-900"
-          }`}
-        >
-          <strong>
-            {sla.overdue > 0 ? `${sla.overdue} overdue` : `${sla.breaching} breaching SLA`}
-            {sla.breaching > 0 && sla.overdue > 0 && ` · ${sla.breaching} breaching`}
-          </strong>
-          {sla.oldest && (
-            <span className="text-xs">
-              oldest:{" "}
-              <Link href={`/incidents/${sla.oldest.id}`} className="font-semibold underline">
-                {sla.oldest.title}
-              </Link>
-            </span>
-          )}
-          <Link href="/incidents?sort=action" className="ml-auto text-xs font-semibold underline">
-            Open needs-action queue
-          </Link>
-        </div>
-      )}
+      <ActionPanel action={data?.action_counts ?? EMPTY_ACTION_COUNTS} />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi label="Total incidents" value={total} sub={`${byCat.length} categories reporting · ${delta}`} spark={sparkTotal} accent="#14231a" />
-        <Kpi label="Needs attention" value={open} sub={attentionSub} spark={sparkOpen} accent="#d97706" />
-        <Kpi label="Resolved" value={resolved} sub={total ? `${Math.round((resolved / Math.max(1, total)) * 100)}% clearance rate` : "No resolutions yet"} spark={sparkResolved} accent="#15803d" />
-        <Kpi label="Critical severity" value={critical} sub={`${sevCount("high")} high-severity alongside · ${delta}`} spark={sparkCritical} accent="#dc2626" />
+        <Kpi label="Total incidents" value={total} sub={`${byCat.length} categories reporting · ${delta}`} definition="Every incident created in this 30-day window." href={incidentHref({ window_days: 30 })} spark={sparkTotal} accent="#14231a" />
+        <Kpi label="Needs attention" value={open} sub={attentionSub} definition="Open workflow statuses requiring staff handling." href={incidentHref({ window_days: 30, state: "needs_attention", sort: "action" })} spark={sparkOpen} accent="#d97706" />
+        <Kpi label="Resolved" value={resolved} sub={total ? `${Math.round((resolved / Math.max(1, total)) * 100)}% clearance rate` : "No resolutions yet"} definition="Resolved or community-confirmed incidents in this window." href={incidentHref({ window_days: 30, state: "resolved" })} spark={sparkResolved} accent="#15803d" />
+        <Kpi label="Critical severity" value={critical} sub={`${sevCount("high")} high-severity alongside · ${delta}`} definition="Incidents marked critical in this window." href={incidentHref({ window_days: 30, severity: "critical", sort: "action" })} spark={sparkCritical} accent="#dc2626" />
       </div>
 
       <Card className="p-5">
@@ -285,17 +323,11 @@ export default function DashboardPage() {
         ) : (hotspots.data ?? []).length === 0 ? (
           <p className="mt-4 rounded-lg bg-zinc-50 p-3 text-sm text-zinc-500">No recurring signals yet — verified reports will surface here.</p>
         ) : (
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {(hotspots.data ?? []).map((spot) => (
-              <div key={spot.id} className="rounded-lg border border-zinc-200 bg-zinc-50/70 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-[#14231a]">{categoryLabel(spot.category)}</span>
-                  <span className="rounded-full bg-[#e8f0e5] px-2 py-0.5 text-[11px] font-bold text-[#285e4a]">{spot.persistence_score} signal</span>
-                </div>
-                <p className="mt-2 text-xs text-zinc-600">{spot.report_count} reports · {spot.unique_contributors} contributor{spot.unique_contributors === 1 ? "" : "s"} · {spot.trend}</p>
-                <p className="mt-1 line-clamp-2 text-xs text-zinc-500">{spot.explanation}</p>
-              </div>
-            ))}
+          <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50/70 px-3">
+            <div className="hidden gap-3 border-b border-zinc-200 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 lg:grid lg:grid-cols-[minmax(8rem,1.25fr)_minmax(7rem,1fr)_4rem_5rem_6.5rem_auto]">
+              <span>Category</span><span>Priority</span><span>Reports</span><span>Contributors</span><span>Last observed</span><span>Action</span>
+            </div>
+            <ul aria-label="Recurring environmental signals">{(hotspots.data ?? []).map((spot) => <SignalRow key={spot.id} signal={spot} />)}</ul>
           </div>
         )}
       </Card>
@@ -408,7 +440,7 @@ export default function DashboardPage() {
                     >
                       <span className="flex min-w-0 items-center gap-2">
                         <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: DONUT_COLORS[i % DONUT_COLORS.length] }} />
-                        <span>{categoryLabel(c.name)}</span>
+                        <span className="min-w-0 truncate">{categoryLabel(c.name)}</span>
                       </span>
                       <span className="whitespace-nowrap font-bold tabular-nums">{c.count} <span className="font-normal text-zinc-400">· {pct}%</span></span>
                     </li>
@@ -439,7 +471,7 @@ export default function DashboardPage() {
         <Card className="p-5 lg:col-span-2">
           <div className="flex items-baseline justify-between">
             <h2 className="text-sm font-bold uppercase tracking-wider text-zinc-500">Status breakdown</h2>
-            <Link href="/incidents" className="text-xs font-semibold text-[#2a4a33] hover:underline">Open all</Link>
+            <Link href={incidentHref({ window_days: 30 })} className="text-xs font-semibold text-[#2a4a33] hover:underline">Open all</Link>
           </div>
           {byStatus.length === 0 ? (
             <div className="mt-3 flex h-40 items-center justify-center rounded-lg bg-zinc-50 text-sm text-zinc-500">No incidents yet — the queue is clear.</div>
@@ -467,7 +499,7 @@ export default function DashboardPage() {
         <Card className="p-5 lg:col-span-3">
           <div className="flex items-baseline justify-between">
             <h2 className="text-sm font-bold uppercase tracking-wider text-zinc-500">Latest activity</h2>
-            <Link href="/incidents" className="text-xs font-semibold text-[#2a4a33] hover:underline">View all incidents</Link>
+            <Link href={incidentHref({ window_days: 30 })} className="text-xs font-semibold text-[#2a4a33] hover:underline">View all incidents</Link>
           </div>
           {recent.isLoading ? (
             <div className="mt-3 space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-14" />)}</div>
@@ -508,7 +540,7 @@ export default function DashboardPage() {
           )}
           {queue.length > 0 && (
             <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              <b>{queue.length}</b> item{queue.length === 1 ? "" : "s"} needing review or escalated — oldest first in <Link href="/incidents" className="font-bold underline">Incidents</Link>.
+              <b>{queue.length}</b> item{queue.length === 1 ? "" : "s"} needing review or escalated — oldest first in <Link href={incidentHref({ window_days: 30, state: "needs_attention", sort: "action" })} className="font-bold underline">Incidents</Link>.
             </div>
           )}
         </Card>

@@ -7,7 +7,9 @@ import type { AppUser } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { FeedbackPanel } from "@/components/ui/feedback-panel";
 import { Input } from "@/components/ui/input";
+import { PageHeader } from "@/components/ui/page-header";
 
 const FONT = { fontFamily: "Verdana, Geneva, sans-serif" } as const;
 
@@ -134,8 +136,14 @@ export default function UsersPage() {
     "rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-[#2a4a33]";
 
   return (
-    <div className="space-y-4" style={FONT}>
-      {/* Toolbar — page title lives in the shell banner */}
+    <div className="mx-auto max-w-[1500px] space-y-6 pb-10" style={FONT}>
+      <PageHeader
+        eyebrow="Manage people"
+        title="Users"
+        description="Review citizen identity, trust, and access status before taking a moderation action."
+        meta={<span aria-live="polite">{isLoading ? "Loading users…" : `${rows.length} visible user${rows.length === 1 ? "" : "s"}`}</span>}
+      />
+      {/* Toolbar */}
       <Card className="space-y-3">
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-52 flex-1">
@@ -208,39 +216,16 @@ export default function UsersPage() {
         </div>
       )}
 
-      {error && !isLoading && (
-        <Card className="border-red-200 bg-red-50 text-center">
-          <p className="text-sm text-red-700">Couldn't load users: {(error as Error).message}</p>
-          <Button onClick={() => refetch()} className="mt-3">
-            Retry
-          </Button>
-        </Card>
-      )}
+      {error && !isLoading && <FeedbackPanel variant="error" title="Users could not load" description={(error as Error).message} action={<Button onClick={() => refetch()}>Retry</Button>} />}
 
-      {!isLoading && !error && rows.length === 0 && (
-        <Card className="py-10 text-center">
-          <p className="font-medium text-zinc-800">No users match</p>
-          <p className="mt-1 text-sm text-zinc-500">Try widening the search or filter.</p>
-          {(search || filter !== "all") && (
-            <Button
-              onClick={() => {
-                setSearch("");
-                setFilter("all");
-              }}
-              className="mt-4"
-            >
-              Reset filters
-            </Button>
-          )}
-        </Card>
-      )}
+      {!isLoading && !error && rows.length === 0 && <FeedbackPanel title="No users match" description="Try widening the search or filter." action={(search || filter !== "all") ? <Button onClick={() => { setSearch(""); setFilter("all"); }}>Reset filters</Button> : undefined} />}
 
       <div className="grid gap-3">
         {rows.map((u) => {
           const contact = u.email ?? u.phone ?? u.device_id ?? u.id;
           const trust = Math.round(u.trust_score * 100) / 100;
           return (
-            <Card key={u.id} className={u.banned ? "border-red-200 bg-red-50/40" : ""}>
+            <Card key={u.id} className={`min-w-0 ${u.banned ? "border-red-200 bg-red-50/40" : ""}`}>
               <div className="flex flex-wrap items-center gap-3">
                 <span
                   aria-hidden
@@ -281,7 +266,7 @@ export default function UsersPage() {
                     <button
                       onClick={() => verify(u)}
                       disabled={patch.isPending}
-                      className="inline-flex items-center justify-center rounded-md bg-green-700 px-4 py-2 text-sm font-medium text-white hover:bg-green-600 disabled:opacity-50"
+                      className="inline-flex items-center justify-center rounded-md bg-green-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50"
                     >
                       Verify
                     </button>
@@ -290,7 +275,7 @@ export default function UsersPage() {
                     <button
                       onClick={() => unban(u)}
                       disabled={patch.isPending}
-                      className="inline-flex items-center justify-center rounded-md bg-transparent px-4 py-2 text-sm font-medium text-zinc-600 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-100 disabled:opacity-50"
+                      className="inline-flex items-center justify-center rounded-md bg-transparent px-4 py-2 text-sm font-medium text-zinc-600 ring-1 ring-inset ring-zinc-300 transition hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50"
                     >
                       Unban
                     </button>
@@ -301,7 +286,7 @@ export default function UsersPage() {
                         setBanReason("");
                       }}
                       disabled={patch.isPending}
-                      className="inline-flex items-center justify-center rounded-md bg-white px-4 py-2 text-sm font-medium text-red-700 ring-1 ring-inset ring-red-300 hover:bg-red-50 disabled:opacity-50"
+                      className="inline-flex items-center justify-center rounded-md bg-white px-4 py-2 text-sm font-medium text-red-700 ring-1 ring-inset ring-red-300 transition hover:bg-red-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50"
                     >
                       Ban
                     </button>
@@ -350,13 +335,13 @@ export default function UsersPage() {
               <button
                 onClick={confirmBan}
                 disabled={patch.isPending}
-                className="inline-flex flex-1 items-center justify-center rounded-md bg-red-700 px-4 py-2 text-sm font-medium text-white hover:bg-red-600 disabled:opacity-50"
+                className="inline-flex flex-1 items-center justify-center rounded-md bg-red-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:cursor-wait disabled:opacity-50"
               >
                 Confirm ban
               </button>
               <button
                 onClick={() => setBanning(null)}
-                className="inline-flex items-center justify-center rounded-md bg-white px-4 py-2 text-sm font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-100"
+                className="inline-flex items-center justify-center rounded-md bg-white px-4 py-2 text-sm font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 transition hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2"
               >
                 Cancel
               </button>
@@ -374,7 +359,7 @@ export default function UsersPage() {
           {toast.msg}
           <button
             onClick={toast.undo}
-            className="rounded px-2 py-0.5 font-medium text-amber-300 hover:bg-white/10"
+            className="rounded px-2 py-0.5 font-medium text-amber-300 transition hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-amber-300 focus:ring-offset-2 focus:ring-offset-zinc-900"
           >
             Undo
           </button>

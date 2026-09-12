@@ -17,6 +17,8 @@ import {
   YAxis,
 } from "recharts";
 import { Card } from "@/components/ui/card";
+import { FeedbackPanel } from "@/components/ui/feedback-panel";
+import { PageHeader } from "@/components/ui/page-header";
 import { InsightsMap, type MapBounds } from "@/components/map";
 import { InsightsTimeline } from "@/components/insights-timeline";
 import { InsightActionPlan } from "@/components/insight-action-plan";
@@ -363,14 +365,16 @@ function AnalyticsPageContent() {
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-6 pb-10" style={FONT}>
-      <header className="flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
-        <div><p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#55705c]">Authority intelligence</p><h1 className="mt-2 text-4xl font-bold tracking-[-0.05em] text-[#14231a]">Insights</h1><p className="mt-2 max-w-[65ch] text-sm leading-6 text-zinc-600">A focused view of what is repeating, where reports are concentrating, and which signals deserve a closer look.</p></div>
-        <div className="text-right"><p className="text-xs text-zinc-500">{data ? `Updated ${dateTime(data.generated_at)}` : "Waiting for live data"}</p>{filters.bounds && <p className="mt-1 text-xs font-semibold text-[#2a4a33]">Map area is applied</p>}</div>
-      </header>
+      <PageHeader
+        eyebrow="Authority intelligence"
+        title="Insights"
+        description="A focused view of what is repeating, where reports are concentrating, and which signals deserve a closer look."
+        meta={<><span className="block">{data ? `Updated ${dateTime(data.generated_at)}` : "Waiting for live data"}</span>{filters.bounds && <span className="mt-1 block font-semibold text-[#2a4a33]">Map area is applied</span>}</>}
+      />
 
       <FilterBar filters={filters} categories={categories} onChange={updateFilters} onPreset={applyPreset} onClear={clearFilters} onRefresh={() => insights.refetch()} refreshing={insights.isFetching} mapUpdating={mapUpdating} />
 
-      {insights.isLoading ? <div className="grid gap-5 lg:grid-cols-[minmax(0,1.55fr)_360px]"><Skeleton className="h-[600px]" /><Skeleton className="h-[600px]" /></div> : insights.error ? <Card className="border-red-200 bg-red-50 p-10 text-center"><p className="text-sm font-semibold text-red-700">Insights could not load from the operations API.</p><button type="button" onClick={() => insights.refetch()} className="mt-4 rounded-lg bg-zinc-900 px-4 py-2 text-sm font-semibold text-white">Retry</button></Card> : <>
+      {insights.isLoading ? <div className="grid gap-5 lg:grid-cols-[minmax(0,1.55fr)_360px]"><Skeleton className="h-[600px]" /><Skeleton className="h-[600px]" /></div> : insights.error ? <FeedbackPanel variant="error" title="Insights could not load" description="The operations intelligence service did not return a usable response." action={<button type="button" onClick={() => insights.refetch()} className="rounded-lg bg-[#14231a] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#285e4a] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Retry</button>} /> : <>
         <section className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Insight summary">
           <Card className="border-[#dfe5dd] p-4"><Metric label="Matching reports" value={data?.summary.total ?? 0} tone="green" /></Card>
           <Card className="border-[#dfe5dd] p-4"><Metric label="Recurring signals" value={data?.signal_count ?? 0} /></Card>

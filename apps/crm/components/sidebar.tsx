@@ -238,8 +238,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 truncate text-xl">
             <span className="font-medium text-zinc-400">CityWatch</span>
             <span aria-hidden className="text-zinc-300">/</span>
-            <h1 className="truncate font-bold text-zinc-900">{title}</h1>
+            <span className="truncate font-bold text-zinc-900">{title}</span>
           </nav>
+          <Link
+            href="/incidents?window_days=30&state=needs_attention&sort=action"
+            aria-label="Review queue — open incidents needing attention"
+            className="shrink-0 rounded-md bg-[#14231a] px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-[#2a4a33] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2 sm:px-3"
+          >
+            <span className="sm:hidden">Review</span>
+            <span className="hidden sm:inline">Review queue</span>
+          </Link>
           <span
             className="hidden rounded-full bg-[#14231a] px-2 py-0.5 text-[10px] font-semibold tracking-widest text-zinc-300 sm:inline-flex"
             title="Operations console v1"

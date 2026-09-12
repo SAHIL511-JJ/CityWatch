@@ -7,6 +7,8 @@ import type { StaffMember } from "@/lib/types";
 import { staffName } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { FeedbackPanel } from "@/components/ui/feedback-panel";
+import { PageHeader } from "@/components/ui/page-header";
 
 const FONT = { fontFamily: "Verdana, Geneva, sans-serif" } as const;
 
@@ -23,7 +25,13 @@ export default function StaffPage() {
   });
 
   return (
-    <div className="space-y-4" style={FONT}>
+    <div className="mx-auto max-w-[1500px] space-y-6 pb-10" style={FONT}>
+      <PageHeader
+        eyebrow="Manage operations"
+        title="Staff"
+        description="See team coverage and open assignments before moving work between queues."
+        meta={<span aria-live="polite">{isLoading ? "Loading staff…" : `${data?.length ?? 0} staff member${(data?.length ?? 0) === 1 ? "" : "s"}`}</span>}
+      />
       <p className="text-sm text-zinc-500" aria-live="polite">
         {isLoading ? (
           "Loading staff…"
@@ -44,11 +52,8 @@ export default function StaffPage() {
           ))}
         </div>
       )}
-      {error && !isLoading && (
-        <Card className="border-red-200 bg-red-50 text-center">
-          <p className="text-sm text-red-700">Couldn't load staff: {(error as Error).message}</p>
-        </Card>
-      )}
+      {error && !isLoading && <FeedbackPanel variant="error" title="Staff could not load" description={(error as Error).message} />}
+      {!isLoading && !error && (data ?? []).length === 0 && <FeedbackPanel title="No staff members found" description="Invite or configure an operations staff member before assigning incidents." />}
       <div className="grid gap-3">
         {(data ?? []).map((s) => {
           const name = staffName(s.email, s.id);
@@ -84,7 +89,7 @@ export default function StaffPage() {
                 </div>
                 <Link
                   href={`/incidents`}
-                  className="text-xs font-semibold text-[#2a4a33] hover:underline"
+                  className="rounded-sm text-xs font-semibold text-[#2a4a33] hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2"
                 >
                   View queue
                 </Link>

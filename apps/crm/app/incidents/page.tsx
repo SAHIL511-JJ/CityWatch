@@ -4,19 +4,20 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch, buildQuery, getApiBase, getToken } from "@/lib/api";
+import { apiFetch, getApiBase, getToken } from "@/lib/api";
 import type { AdminIncidentPage, DuplicatePair, Incident, Severity, StaffMember } from "@/lib/types";
+import { INCIDENT_PAGE_SIZE, incidentScopeQuery, readIncidentScope } from "@/lib/incident-scope";
 import { staffName } from "@/lib/types";
 import { categoryLabel } from "@/lib/taxonomy";
 import { slaFor, slaLabel } from "@/lib/sla";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { PageHeader } from "@/components/ui/page-header";
+import { FeedbackPanel } from "@/components/ui/feedback-panel";
 import { Input } from "@/components/ui/input";
 
 const FONT = { fontFamily: "Verdana, Geneva, sans-serif" } as const;
-const PAGE_SIZE = 25;
-
 const STATUSES = [
   "processing",
   "needs_review",
@@ -49,16 +50,6 @@ const SEV_BAR: Record<Severity, string> = {
   low: "bg-zinc-300",
 };
 
-type SortKey = "newest" | "oldest" | "severity" | "action";
-type QueueKey = "" | "mine" | "unassigned";
-type Scope = {
-  q: string;
-  status: string;
-  severity: string;
-  queue: QueueKey;
-  sort: SortKey;
-  page: number;
-};
 type BulkAction =
   | { kind: "status"; value: string; label: string }
   | { kind: "assigned_to"; value: string; label: string };
@@ -77,32 +68,6 @@ function timeAgo(iso: string): string {
 
 function labelFor(value: string): string {
   return STATUS_LABELS[value] ?? value.replaceAll("_", " ");
-}
-
-function readScope(params: Readonly<URLSearchParams>): Scope {
-  const sort = params.get("sort");
-  const page = Number(params.get("page"));
-  const queue = params.get("queue");
-  return {
-    q: params.get("q") ?? "",
-    status: params.get("status") ?? "",
-    severity: params.get("severity") ?? "",
-    queue: queue === "mine" || queue === "unassigned" ? queue : "",
-    sort: sort === "oldest" || sort === "severity" || sort === "action" ? sort : "newest",
-    page: Number.isInteger(page) && page > 0 ? page : 1,
-  };
-}
-
-function scopeQuery(scope: Scope): string {
-  return buildQuery({
-    q: scope.q || undefined,
-    status: scope.status || undefined,
-    severity: scope.severity || undefined,
-    queue: scope.queue || undefined,
-    sort: scope.sort === "newest" ? undefined : scope.sort,
-    page: String(scope.page),
-    page_size: String(PAGE_SIZE),
-  });
 }
 
 function thumbSrc(inc: Incident): string | null {
@@ -179,7 +144,7 @@ function IncidentsInner() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const qc = useQueryClient();
-  const scope = useMemo(() => readScope(searchParams), [searchParams]);
+  const scope = useMemo(() => readIncidentScope(searchParams), [searchParams]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [selectionMode, setSelectionMode] = useState<"page" | "filtered" | null>(null);
   const [bulkAssignee, setBulkAssignee] = useState("");
@@ -188,7 +153,7 @@ function IncidentsInner() {
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["admin-incidents", scope],
-    queryFn: () => apiFetch<AdminIncidentPage>(`/admin/incidents${scopeQuery(scope)}`),
+    queryFn: () => apiFetch<AdminIncidentPage>(`/admin/incidents${incidentScopeQuery(scope)}`),
   });
   const staff = useQuery({
     queryKey: ["admin-staff"],
@@ -201,9 +166,21 @@ function IncidentsInner() {
     retry: false,
   });
 
-  const replaceScope = (updates: Partial<Scope>) => {
+  const replaceScope = (updates: Partial<typeof scope>) => {
     const next = { ...scope, ...updates };
-    const query = scopeQuery(next).replace("&page_size=25", "").replace("?page=1&page_size=25", "");
+    if (updates.status) {
+      next.state = "";
+      next.sla = "";
+    }
+    if (updates.state === "resolved") {
+      next.status = "";
+      next.sla = "";
+    }
+    if (updates.sla) {
+      next.state = "needs_attention";
+      next.status = "";
+    }
+    const query = incidentScopeQuery(next, false);
     router.replace(`${pathname}${query}`, { scroll: false });
   };
 
@@ -218,7 +195,7 @@ function IncidentsInner() {
     setSelectionMode(null);
     setPendingBulk(null);
     setBulkAssignee("");
-  }, [scope.q, scope.status, scope.severity, scope.queue, scope.sort, scope.page]);
+  }, [scope.q, scope.status, scope.severity, scope.queue, scope.window_days, scope.state, scope.sla, scope.sort, scope.page]);
 
   useEffect(() => {
     if (data && data.page !== scope.page) replaceScope({ page: data.page });
@@ -251,11 +228,11 @@ function IncidentsInner() {
   const rows = data?.items ?? [];
   const selectedIds = rows.filter((row) => selected[row.id]).map((row) => row.id);
   const pageSelected = rows.length > 0 && rows.every((row) => selected[row.id]);
-  const hasScope = !!scope.q || !!scope.status || !!scope.severity || !!scope.queue || scope.sort !== "newest" || scope.page > 1;
+  const hasScope = !!scope.q || !!scope.status || !!scope.severity || !!scope.queue || !!scope.window_days || !!scope.state || !!scope.sla || scope.sort !== "newest" || scope.page > 1;
   const total = data?.total ?? 0;
   const totalPages = data?.total_pages ?? 0;
-  const firstResult = total === 0 ? 0 : (scope.page - 1) * PAGE_SIZE + 1;
-  const lastResult = total === 0 ? 0 : Math.min(scope.page * PAGE_SIZE, total);
+  const firstResult = total === 0 ? 0 : (scope.page - 1) * INCIDENT_PAGE_SIZE + 1;
+  const lastResult = total === 0 ? 0 : Math.min(scope.page * INCIDENT_PAGE_SIZE, total);
 
   const refreshAll = () => {
     qc.invalidateQueries({ queryKey: ["admin-incidents"] });
@@ -282,6 +259,9 @@ function IncidentsInner() {
     status: scope.status || null,
     severity: scope.severity || null,
     queue: scope.queue || null,
+    window_days: scope.window_days,
+    state: scope.state || null,
+    sla: scope.sla || null,
   };
 
   const confirmBulk = () => {
@@ -296,8 +276,9 @@ function IncidentsInner() {
     router.replace(pathname, { scroll: false });
   };
 
-  const clearOne = (key: keyof Scope) => {
-    if (key === "q" || key === "status" || key === "severity" || key === "queue") replaceScope({ [key]: "", page: 1 });
+  const clearOne = (key: keyof typeof scope) => {
+    if (key === "q" || key === "status" || key === "severity" || key === "queue" || key === "state" || key === "sla") replaceScope({ [key]: "", page: 1 });
+    else if (key === "window_days") replaceScope({ window_days: null, page: 1 });
     else if (key === "sort") replaceScope({ sort: "newest", page: 1 });
     else replaceScope({ page: 1 });
   };
@@ -328,7 +309,13 @@ function IncidentsInner() {
   const selectCls = "rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm capitalize outline-none transition focus:border-[#2a4a33] focus:ring-2 focus:ring-[#dce8dc]";
 
   return (
-    <div className="space-y-4" style={FONT}>
+    <div className="mx-auto max-w-[1500px] space-y-6 pb-10" style={FONT}>
+      <PageHeader
+        eyebrow="Review queue"
+        title="Incidents"
+        description="Scan reports, focus the right queue, and move each incident to its next safe action."
+        meta={<span aria-live="polite">{isLoading ? "Loading queue…" : `${total} matching incident${total === 1 ? "" : "s"}`}</span>}
+      />
       <Card className="space-y-4">
         <div className="flex flex-wrap items-end gap-3">
           <div className="w-full min-w-0 sm:min-w-56 sm:flex-1">
@@ -351,7 +338,7 @@ function IncidentsInner() {
           </div>
           <div className="w-full sm:w-auto">
             <label htmlFor="inc-queue" className="mb-1 block text-xs font-medium text-zinc-500">Queue</label>
-            <select id="inc-queue" className={`${selectCls} w-full sm:w-auto`} value={scope.queue} onChange={(event) => replaceScope({ queue: event.target.value as QueueKey, page: 1 })}>
+            <select id="inc-queue" className={`${selectCls} w-full sm:w-auto`} value={scope.queue} onChange={(event) => replaceScope({ queue: event.target.value as typeof scope.queue, page: 1 })}>
               <option value="">All incidents</option>
               <option value="mine">My queue — open and assigned to you</option>
               <option value="unassigned">Unassigned — open with no owner</option>
@@ -359,7 +346,7 @@ function IncidentsInner() {
           </div>
           <div className="w-full sm:w-auto">
             <label htmlFor="inc-sort" className="mb-1 block text-xs font-medium text-zinc-500">Sort</label>
-            <select id="inc-sort" className={`${selectCls} w-full sm:w-auto`} value={scope.sort} onChange={(event) => replaceScope({ sort: event.target.value as SortKey, page: 1 })}>
+            <select id="inc-sort" className={`${selectCls} w-full sm:w-auto`} value={scope.sort} onChange={(event) => replaceScope({ sort: event.target.value as typeof scope.sort, page: 1 })}>
               <option value="newest">Newest first</option>
               <option value="oldest">Oldest first</option>
               <option value="severity">Highest severity</option>
@@ -375,6 +362,9 @@ function IncidentsInner() {
           {scope.severity && <FilterChip label={`Severity: ${scope.severity}`} onRemove={() => clearOne("severity")} />}
           {scope.queue === "mine" && <FilterChip label="Queue: My queue — open and assigned to you" onRemove={() => clearOne("queue")} />}
           {scope.queue === "unassigned" && <FilterChip label="Queue: Unassigned — open with no owner" onRemove={() => clearOne("queue")} />}
+          {scope.window_days && <FilterChip label={`Last ${scope.window_days} days`} onRemove={() => clearOne("window_days")} />}
+          {scope.state && <FilterChip label={`State: ${scope.state === "needs_attention" ? "Needs attention" : "Resolved"}`} onRemove={() => clearOne("state")} />}
+          {scope.sla && <FilterChip label={`SLA: ${scope.sla === "overdue" ? "Overdue" : "Breaching"}`} onRemove={() => clearOne("sla")} />}
           {scope.sort !== "newest" && <FilterChip label={`Sort: ${scope.sort === "action" ? "Needs action" : scope.sort}`} onRemove={() => clearOne("sort")} />}
           {!hasScope && <span className="text-xs text-zinc-500">All incidents · newest first</span>}
         </div>
@@ -404,8 +394,8 @@ function IncidentsInner() {
       )}
 
       {isLoading && <SkeletonRows />}
-      {error && !isLoading && <Card className="border-red-200 bg-red-50 text-center"><p className="text-sm text-red-700">Couldn’t load incidents: {(error as Error).message}</p><Button onClick={() => refetch()} className="mt-3 bg-[#14231a] hover:bg-[#2a4a33]">Retry</Button></Card>}
-      {!isLoading && !error && rows.length === 0 && <Card className="py-10 text-center"><svg viewBox="0 0 48 48" fill="none" className="mx-auto h-12 w-12 text-zinc-300" aria-hidden><circle cx="22" cy="22" r="12" stroke="currentColor" strokeWidth="3" /><path d="M31 31l9 9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" /></svg><p className="mt-3 font-medium text-zinc-800">No incidents match this scope</p><p className="mx-auto mt-1 max-w-md text-sm text-zinc-500">Try changing the filters or clear all to return to the full queue.</p>{hasScope && <Button onClick={clearAll} className="mt-4 bg-[#14231a] hover:bg-[#2a4a33]">Clear all</Button>}</Card>}
+      {error && !isLoading && <FeedbackPanel variant="error" title="Incidents could not load" description={(error as Error).message} action={<Button onClick={() => refetch()} className="bg-[#14231a] hover:bg-[#2a4a33]">Retry</Button>} />}
+      {!isLoading && !error && rows.length === 0 && <FeedbackPanel title="No incidents match this scope" description={hasScope ? "Try removing a filter or clear all to return to the full queue." : "There are no incidents in the current queue."} action={hasScope ? <Button onClick={clearAll} className="bg-[#14231a] hover:bg-[#2a4a33]">Clear all</Button> : undefined} />}
 
       {!isLoading && !error && rows.length > 0 && <section aria-label="Incident results" className="space-y-2"><div className="flex items-center gap-2 px-1 text-xs text-zinc-500"><input type="checkbox" aria-label={`Select page (${rows.length})`} checked={pageSelected} onChange={(event) => selectPage(event.target.checked)} className="h-4 w-4 accent-[#2a4a33]" /><span>Select page ({rows.length})</span></div><div className="grid gap-2">{rows.map((inc) => { const src = thumbSrc(inc); const location = inc.address ?? `${inc.lat.toFixed(3)}, ${inc.lng.toFixed(3)}`; const sla = slaFor(inc.created_at, inc.severity, inc.status); const duplicates = dupCount.get(inc.id) ?? []; const owner = ownerName(inc.assigned_to); return <Card key={inc.id} className="relative overflow-hidden p-3 transition-shadow hover:shadow-md"><span aria-hidden className={`absolute inset-y-0 left-0 w-1 ${SEV_BAR[inc.severity]}`} /><div className="grid gap-3 pl-2 xl:grid-cols-[auto_auto_minmax(18rem,1fr)_minmax(130px,auto)_minmax(105px,auto)_auto] xl:items-center"><input type="checkbox" aria-label={`Select ${inc.title}`} checked={!!selected[inc.id]} onChange={(event) => selectRow(inc.id, event.target.checked)} className="h-4 w-4 accent-[#2a4a33]" /><Thumb src={src} /><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><Link href={`/incidents/${inc.id}`} className="max-w-full font-semibold text-zinc-900 underline-offset-2 transition hover:text-[#2a4a33] hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">{inc.title}</Link>{duplicates.length > 0 && <Link href={`/incidents/${inc.id}#duplicates`} title={duplicates.map((item) => `Score ${item.score} · ${item.distance_m}m · ${item.hours_apart}h apart`).join("\n")} className="rounded-md bg-purple-50 px-1.5 py-0.5 text-[11px] font-bold text-purple-800 hover:bg-purple-100 focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">{duplicates.length} duplicate{duplicates.length > 1 ? "s" : ""}</Link>}</div><p className="mt-0.5 truncate text-xs text-zinc-500" title={location}>{location}</p><p className="mt-1 line-clamp-2 max-w-2xl text-sm leading-relaxed text-zinc-600">{inc.description || "No description provided."}</p></div><div className="flex flex-wrap items-center gap-1.5 xl:justify-end">{sla && sla.state !== "ok" && <span title={slaLabel(sla)} className={`rounded-md px-2 py-1 text-xs font-bold ${sla.state === "overdue" ? "bg-red-600 text-white" : "bg-amber-100 text-amber-800"}`}>{sla.state === "overdue" ? "Overdue" : "Breaching"}</span>}<Badge value={inc.status} /><Badge value={inc.severity} /></div><div className="text-xs text-zinc-500"><span className="text-[11px] uppercase tracking-wide text-zinc-400">Owner</span><span className="mt-0.5 block truncate" title={owner}>{owner}</span></div><div className="flex items-center justify-between gap-3 text-xs text-zinc-500 xl:block xl:text-right"><span className="text-[11px] uppercase tracking-wide text-zinc-400">Age</span><span className="mt-0.5 block tabular-nums" title={new Date(inc.created_at).toLocaleString()}>{timeAgo(inc.created_at)}</span><Link href={`/incidents/${inc.id}`} className="mt-1 inline-block font-medium text-[#285e4a] hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Open incident</Link></div></div></Card>; })}</div></section>}
 

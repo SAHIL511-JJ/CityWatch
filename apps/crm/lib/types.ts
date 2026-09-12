@@ -170,10 +170,18 @@ export interface ResolutionEvidence {
 }
 
 export interface AnalyticsSummary {
+  window_days: number;
   by_category: { name: string; count: number }[];
   by_status: { status: string; count: number }[];
   by_severity: { severity: string; count: number }[];
   by_day: { date: string; count: number; resolved?: number; open?: number; critical?: number }[];
+  action_counts: {
+    overdue: number;
+    breaching: number;
+    needs_review: number;
+    escalated: number;
+    needs_follow_up: number;
+  };
   total?: number;
 }
 
