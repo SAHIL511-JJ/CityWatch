@@ -40,6 +40,14 @@ export interface Incident {
   created_at: string;
 }
 
+export interface AdminIncidentPage {
+  items: Incident[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
 export interface Hotspot {
   id: string;
   category: string;

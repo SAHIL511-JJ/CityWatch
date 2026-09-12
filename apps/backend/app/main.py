@@ -12,8 +12,8 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from sqlalchemy import func
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import and_, case, func, or_, text
 from sqlalchemy.orm import Session
 
 from . import auth
@@ -57,6 +57,7 @@ from .resolution_evidence import (
 )
 from .storage import get_storage
 from .taxonomy import (
+    ENVIRONMENTAL_CATEGORIES,
     canonical_category,
     normalize_analysis,
 )
@@ -80,6 +81,10 @@ TRIAGE_STATUSES = {
     "escalated",
     "closed",
 }
+VALID_INCIDENT_STATUSES = TRIAGE_STATUSES | RESOLUTION_STATUSES | {"resolved"}
+TERMINAL_INCIDENT_STATUSES = {"resolved", "community_confirmed", "closed"}
+INCIDENT_QUEUES = {"mine", "unassigned"}
+INCIDENT_SORTS = {"newest", "oldest", "severity", "action"}
 
 
 # ---------- schemas ----------
@@ -114,6 +119,99 @@ class AdminPatchIn(BaseModel):
 
 class NoteIn(BaseModel):
     note: str
+
+
+class AdminIncidentPage(BaseModel):
+    items: list[dict]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class BulkFiltersIn(BaseModel):
+    q: str | None = Field(default=None, max_length=100)
+    status: str | None = None
+    severity: str | None = None
+    queue: str | None = None
+
+
+class ResolutionReviewIn(BaseModel):
+    outcome: str
+    review_note: str | None = None
+
+
+HOTSPOT_TRENDS = {"rising", "stable", "declining", "isolated"}
+HOTSPOT_SEVERITIES = {"low", "medium", "high", "critical"}
+
+
+class HotspotCentroid(BaseModel):
+    lat: float = Field(description="Latitude of the derived hotspot centroid")
+    lng: float = Field(description="Longitude of the derived hotspot centroid")
+
+
+class PublicHotspotOut(BaseModel):
+    """Safe hotspot data shared with authenticated citizen clients."""
+
+    id: str
+    category: str
+    centroid: HotspotCentroid
+    report_count: int
+    unique_contributors: int
+    first_observed: str
+    last_observed: str
+    severity_summary: dict[str, int]
+    latest_status: str
+    persistence_score: int
+    trend: str
+    mean_distance_km: float
+    report_ids: list[str]
+    explanation: str
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "id": "flooding:18.5204:73.8552",
+                "category": "flooding",
+                "centroid": {"lat": 18.5204, "lng": 73.8552},
+                "report_count": 4,
+                "unique_contributors": 3,
+                "first_observed": "2026-09-01T08:00:00+00:00",
+                "last_observed": "2026-09-08T08:00:00+00:00",
+                "severity_summary": {"high": 2, "medium": 2},
+                "latest_status": "verified",
+                "persistence_score": 78,
+                "trend": "rising",
+                "mean_distance_km": 0.18,
+                "report_ids": ["incident-1", "incident-2"],
+                "explanation": "4 flooding observations from 3 contributor(s) across 7.0 days; mean spread 0.18 km; average confidence 91%.",
+            }
+        }
+    )
+
+
+class HotspotAssignment(BaseModel):
+    incident_id: str
+    assigned_to: str | None
+    status: str
+
+
+class HotspotAssignmentStatus(BaseModel):
+    assigned: int
+    unassigned: int
+    by_incident: list[HotspotAssignment]
+
+
+class HotspotEvidenceCounts(BaseModel):
+    reports: int
+    photos: int
+    notes: int
+
+
+class StaffHotspotOut(PublicHotspotOut):
+    related_incident_ids: list[str]
+    assignment_status: HotspotAssignmentStatus
+    evidence_counts: HotspotEvidenceCounts
 
 
 # ---------- helpers ----------
@@ -578,6 +676,68 @@ def public_photo(incident_id: str, db: Session = Depends(get_db)):
     raise HTTPException(404, "photo unavailable")
 
 
+def _validate_hotspot_filters(
+    *,
+    lat: float | None,
+    lng: float | None,
+    severity: str | None,
+    trend: str | None,
+) -> None:
+    if (lat is None) != (lng is None):
+        raise HTTPException(422, "lat and lng must be provided together")
+    if severity is not None and severity not in HOTSPOT_SEVERITIES:
+        raise HTTPException(422, "invalid severity")
+    if trend is not None and trend not in HOTSPOT_TRENDS:
+        raise HTTPException(422, "invalid trend")
+
+
+def _category_filter(category: str | None) -> str | None:
+    if category is None:
+        return None
+    normalized = canonical_category(category)
+    if normalized not in ENVIRONMENTAL_CATEGORIES:
+        raise HTTPException(422, "invalid category")
+    return normalized
+
+
+@app.get(
+    "/hotspots",
+    response_model=list[PublicHotspotOut],
+    summary="List nearby public environmental hotspots",
+    description=(
+        "Returns only verified, high-confidence hotspot summaries for the signed-in "
+        "citizen. Reporter identity, assignment data, internal notes, and private "
+        "evidence metadata are never included."
+    ),
+)
+def public_hotspots(
+    lat: float = Query(..., ge=-90, le=90),
+    lng: float = Query(..., ge=-180, le=180),
+    radius_km: float = Query(0.75, ge=0.05, le=25),
+    window_days: int = Query(30, ge=1, le=365),
+    limit: int = Query(20, ge=1, le=100),
+    category: str | None = Query(None),
+    severity: str | None = Query(None),
+    trend: str | None = Query(None),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _validate_hotspot_filters(lat=lat, lng=lng, severity=severity, trend=trend)
+    from .hotspots import detect_hotspots
+
+    return detect_hotspots(
+        db,
+        radius_km=radius_km,
+        window_days=window_days,
+        limit=limit,
+        center_lat=lat,
+        center_lng=lng,
+        category=_category_filter(category),
+        severity=severity,
+        trend=trend,
+    )
+
+
 # ---------- admin ----------
 @app.post("/admin/login")
 def admin_login(body: AdminLoginIn, db: Session = Depends(get_db)):
@@ -587,20 +747,155 @@ def admin_login(body: AdminLoginIn, db: Session = Depends(get_db)):
     return {"token": create_token(s.id, {"role": s.role}), "role": s.role}
 
 
-@app.get("/admin/incidents")
+@app.post("/admin/demo-fixtures/citiwatch")
+def seed_citiwatch_demo_fixture(
+    staff: Staff = Depends(get_current_staff), db: Session = Depends(get_db)
+):
+    """Opt-in KAN-38 demo data for the one shared Supabase database."""
+
+    if not settings.ENABLE_DEMO_FIXTURES:
+        raise HTTPException(404, "demo fixtures are disabled")
+    from .demo_fixtures import seed_citiwatch_demo
+
+    try:
+        result = seed_citiwatch_demo(db, staff)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    except Exception as exc:
+        raise HTTPException(502, f"demo evidence source failed: {exc}")
+    reports = result["reports"]
+    return {
+        "created": result["created"],
+        "marker": result["marker"],
+        "report_count": len(reports),
+        "incident_ids": [str(report.id) for report in reports],
+    }
+
+
+def _clean_incident_scope(
+    *,
+    q: str | None,
+    status: str | None,
+    severity: str | None,
+    queue: str | None,
+    sort: str,
+) -> tuple[str | None, str | None, str | None, str | None, str]:
+    clean_q = (q or "").strip() or None
+    if clean_q and len(clean_q) > 100:
+        raise HTTPException(422, "q must be 100 characters or fewer")
+    if status is not None and status not in VALID_INCIDENT_STATUSES:
+        raise HTTPException(422, "invalid incident status")
+    if severity is not None and severity not in HOTSPOT_SEVERITIES:
+        raise HTTPException(422, "invalid incident severity")
+    if queue is not None and queue not in INCIDENT_QUEUES:
+        raise HTTPException(422, "invalid incident queue")
+    if sort not in INCIDENT_SORTS:
+        raise HTTPException(422, "invalid incident sort")
+    return clean_q, status, severity, queue, sort
+
+
+def _apply_incident_scope(
+    query,
+    *,
+    q: str | None,
+    status: str | None,
+    severity: str | None,
+    queue: str | None,
+    staff_id: str,
+):
+    if q:
+        pattern = f"%{q}%"
+        query = query.filter(
+            or_(Incident.title.ilike(pattern), Incident.description.ilike(pattern))
+        )
+    if status:
+        query = query.filter(Incident.status == status)
+    if severity:
+        query = query.filter(Incident.severity == severity)
+    if queue == "mine":
+        query = query.filter(
+            Incident.assigned_to == staff_id,
+            Incident.status.notin_(TERMINAL_INCIDENT_STATUSES),
+        )
+    elif queue == "unassigned":
+        query = query.filter(
+            Incident.assigned_to.is_(None),
+            Incident.status.notin_(TERMINAL_INCIDENT_STATUSES),
+        )
+    return query
+
+
+def _incident_action_rank():
+    overdue = or_(
+        and_(Incident.severity == "critical", Incident.created_at <= func.now() - text("interval '1 hour'")),
+        and_(Incident.severity == "high", Incident.created_at <= func.now() - text("interval '4 hours'")),
+        and_(Incident.severity == "medium", Incident.created_at <= func.now() - text("interval '24 hours'")),
+        and_(Incident.severity == "low", Incident.created_at <= func.now() - text("interval '48 hours'")),
+    )
+    breaching = or_(
+        and_(Incident.severity == "critical", Incident.created_at <= func.now() - text("interval '45 minutes'")),
+        and_(Incident.severity == "high", Incident.created_at <= func.now() - text("interval '3 hours'")),
+        and_(Incident.severity == "medium", Incident.created_at <= func.now() - text("interval '18 hours'")),
+        and_(Incident.severity == "low", Incident.created_at <= func.now() - text("interval '36 hours'")),
+    )
+    return case(
+        (Incident.status.in_(TERMINAL_INCIDENT_STATUSES), 3),
+        (overdue, 0),
+        (breaching, 1),
+        else_=2,
+    )
+
+
+def _order_incidents(query, sort: str):
+    if sort == "oldest":
+        return query.order_by(Incident.created_at.asc(), Incident.id.asc())
+    if sort == "severity":
+        severity_rank = case(
+            (Incident.severity == "critical", 0),
+            (Incident.severity == "high", 1),
+            (Incident.severity == "medium", 2),
+            else_=3,
+        )
+        return query.order_by(severity_rank.asc(), Incident.created_at.asc(), Incident.id.asc())
+    if sort == "action":
+        return query.order_by(_incident_action_rank().asc(), Incident.created_at.asc(), Incident.id.asc())
+    return query.order_by(Incident.created_at.desc(), Incident.id.asc())
+
+
+@app.get("/admin/incidents", response_model=AdminIncidentPage)
 def admin_list(
+    q: str | None = Query(None, max_length=100),
     status: str | None = None,
     severity: str | None = None,
+    queue: str | None = None,
+    sort: str = Query("newest"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
     staff: Staff = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ):
-    q = db.query(Incident).order_by(Incident.created_at.desc()).limit(200)
-    rows = q.all()
-    if status:
-        rows = [r for r in rows if r.status == status]
-    if severity:
-        rows = [r for r in rows if r.severity == severity]
-    return [incident_out(r) for r in rows]
+    q, status, severity, queue, sort = _clean_incident_scope(
+        q=q, status=status, severity=severity, queue=queue, sort=sort
+    )
+    query = _apply_incident_scope(
+        db.query(Incident),
+        q=q,
+        status=status,
+        severity=severity,
+        queue=queue,
+        staff_id=str(staff.id),
+    )
+    total = query.count()
+    total_pages = math.ceil(total / page_size) if total else 0
+    actual_page = min(page, total_pages) if total_pages else 1
+    rows = _order_incidents(query, sort).offset((actual_page - 1) * page_size).limit(page_size).all()
+    return {
+        "items": [incident_out(row) for row in rows],
+        "total": total,
+        "page": actual_page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+    }
 
 
 @app.patch("/admin/incidents/{incident_id}")
@@ -880,7 +1175,9 @@ BULK_SEVERITY = {"low", "medium", "high", "critical"}
 
 
 class BulkIn(BaseModel):
-    ids: list[str]
+    ids: list[str] | None = None
+    scope: str | None = None
+    filters: BulkFiltersIn | None = None
     status: str | None = None
     severity: str | None = None
     assigned_to: str | None = None
@@ -892,8 +1189,14 @@ def admin_bulk(
     staff: Staff = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ):
-    if not body.ids:
-        raise HTTPException(422, "no ids given")
+    explicit_ids = list(dict.fromkeys(body.ids or []))
+    filtered_scope = body.scope == "filtered"
+    if body.scope not in (None, "filtered"):
+        raise HTTPException(422, "bad bulk scope")
+    if bool(explicit_ids) == filtered_scope:
+        raise HTTPException(422, "provide ids or filtered scope")
+    if filtered_scope and body.filters is None:
+        raise HTTPException(422, "filters are required for filtered scope")
     if body.status is not None and body.status not in BULK_STATUS:
         raise HTTPException(422, "bad status")
     if body.severity is not None and body.severity not in BULK_SEVERITY:
@@ -904,9 +1207,28 @@ def admin_bulk(
         raise HTTPException(422, "assignee is not staff")
     if body.status is None and body.severity is None and body.assigned_to is None:
         raise HTTPException(422, "nothing to apply")
+    if filtered_scope:
+        filters = body.filters
+        filter_q, filter_status, filter_severity, filter_queue, _ = _clean_incident_scope(
+            q=filters.q,
+            status=filters.status,
+            severity=filters.severity,
+            queue=filters.queue,
+            sort="newest",
+        )
+        target_query = _apply_incident_scope(
+            db.query(Incident),
+            q=filter_q,
+            status=filter_status,
+            severity=filter_severity,
+            queue=filter_queue,
+            staff_id=str(staff.id),
+        )
+        explicit_ids = [str(row.id) for row in target_query.all()]
+    matched = len(explicit_ids)
     results = []
     unset_assign = "assigned_to" in body.model_fields_set and body.assigned_to is None
-    for iid in body.ids:
+    for iid in explicit_ids:
         i = db.get(Incident, iid)
         if i is None:
             results.append({"id": iid, "ok": False, "error": "not found"})
@@ -940,7 +1262,11 @@ def admin_bulk(
             )
         results.append({"id": str(i.id), "ok": True, "changed": changed})
     db.commit()
-    return {"updated": sum(1 for r in results if r["ok"]), "results": results}
+    return {
+        "matched": matched,
+        "updated": sum(1 for r in results if r["ok"]),
+        "results": results,
+    }
 
 
 @app.get("/admin/users")
@@ -1223,7 +1549,7 @@ def admin_photo(
 ):
     """Serve incident photo. <img> tags can't send headers, so staff JWT
     is accepted as ?token= query param (falls back to Bearer header)."""
-    from fastapi.responses import RedirectResponse
+    from fastapi.responses import RedirectResponse, Response
 
     raw = token
     if not raw and request is not None:
@@ -1248,7 +1574,11 @@ def admin_photo(
     if key.startswith(f"{settings.STORAGE_BUCKET}/"):
         if not settings.SUPABASE_SERVICE_KEY:
             raise HTTPException(404, "photo unavailable")
-        url = get_storage().signed_url(key.split("/", 1)[1])
+        try:
+            url = get_storage().signed_url(key.split("/", 1)[1])
+        except Exception:
+            # A list row can still render its metadata when storage is slow or unavailable.
+            return Response(status_code=204)
         return RedirectResponse(url, status_code=302)
     raise HTTPException(404, "photo unavailable")
 
@@ -1329,18 +1659,31 @@ def analytics(staff: Staff = Depends(get_current_staff), db: Session = Depends(g
     }
 
 
-@app.get("/admin/analytics/hotspots")
+@app.get(
+    "/admin/analytics/hotspots",
+    response_model=list[StaffHotspotOut],
+    summary="List explainable hotspot intelligence for staff",
+    description=(
+        "Returns deterministically ranked verified hotspot clusters with related "
+        "incident IDs, assignment status, photo/note evidence counts, trend, and "
+        "a human-readable explanation."
+    ),
+)
 def admin_hotspots(
     radius_km: float = Query(0.75, ge=0.05, le=25),
     window_days: int = Query(30, ge=1, le=365),
     limit: int = Query(50, ge=1, le=100),
     lat: float | None = Query(None, ge=-90, le=90),
     lng: float | None = Query(None, ge=-180, le=180),
+    category: str | None = Query(None),
+    severity: str | None = Query(None),
+    trend: str | None = Query(None),
     staff: Staff = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ):
     """Rank recurring environmental signals without a permanent hotspot table."""
 
+    _validate_hotspot_filters(lat=lat, lng=lng, severity=severity, trend=trend)
     from .hotspots import detect_hotspots
 
     return detect_hotspots(
@@ -1350,6 +1693,10 @@ def admin_hotspots(
         limit=limit,
         center_lat=lat,
         center_lng=lng,
+        category=_category_filter(category),
+        severity=severity,
+        trend=trend,
+        include_staff_details=True,
     )
 
 

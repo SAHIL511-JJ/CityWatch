@@ -66,7 +66,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const { data: queue } = useQuery({
     queryKey: ["sidebar-needs-review"],
     queryFn: () =>
-      apiFetch<unknown[]>(`/admin/incidents?status=needs_review`),
+      apiFetch<{ total: number }>(`/admin/incidents?status=needs_review`),
     enabled: pathname !== "/login",
     refetchInterval: 60000,
     retry: false,
@@ -102,7 +102,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         {
           href: "/incidents",
           label: "Incidents",
-          badge: queue?.length,
+          badge: queue?.total,
           icon: <Icon d={ICONS.incidents} />,
         },
       ],
@@ -156,11 +156,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <aside
         className={`sticky top-0 flex h-screen shrink-0 flex-col bg-[#14231a] text-zinc-300 transition-[width] ${
           collapsed ? "w-16" : "w-60"
-        } max-sm:w-16`}
+        } max-sm:w-16 max-sm:overflow-hidden`}
       >
-        <div className={`flex shrink-0 items-center gap-2.5 px-5 pb-5 pt-6 max-sm:justify-center max-sm:px-0 ${collapsed ? "flex-col gap-1 px-0" : ""}`}>
+        <div className={`relative flex shrink-0 items-center gap-2.5 px-5 pb-5 pt-6 max-sm:justify-center max-sm:gap-0 max-sm:px-0 ${collapsed ? "flex-col gap-1 px-0" : ""}`}>
           <span
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#c2410c] text-sm font-bold text-white"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#c2410c] text-sm font-bold text-white max-sm:hidden"
             title="CityWatch ops console"
           >
             CW
@@ -175,7 +175,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             onClick={toggleCollapsed}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-white/5 hover:text-white ${collapsed ? "" : "ml-auto"} max-sm:ml-0`}
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-zinc-400 hover:bg-white/5 hover:text-white ${collapsed ? "" : "ml-auto"} max-sm:absolute max-sm:right-0 max-sm:ml-0`}
           >
             <Icon d={collapsed ? "M7 4l6 6-6 6M13 4l6 6-6 6" : "M13 4L7 10l6 6M7 4L1 10l6 6"} />
           </button>
@@ -234,19 +234,19 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-[#e8e0d0] bg-[#faf7f0] px-4 py-4 sm:px-8">
-          <nav aria-label="Breadcrumb" className="flex items-center gap-2 text-xl">
+        <header className="flex min-w-0 items-center gap-3 overflow-hidden border-b border-[#e8e0d0] bg-[#faf7f0] px-4 py-4 sm:px-8">
+          <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 truncate text-xl">
             <span className="font-medium text-zinc-400">CityWatch</span>
             <span aria-hidden className="text-zinc-300">/</span>
-            <h1 className="font-bold text-zinc-900">{title}</h1>
+            <h1 className="truncate font-bold text-zinc-900">{title}</h1>
           </nav>
           <span
-            className="rounded-full bg-[#14231a] px-2 py-0.5 text-[10px] font-semibold tracking-widest text-zinc-300"
+            className="hidden rounded-full bg-[#14231a] px-2 py-0.5 text-[10px] font-semibold tracking-widest text-zinc-300 sm:inline-flex"
             title="Operations console v1"
           >
             OPS · V1
           </span>
-          <span className="w-12 text-xs tabular-nums text-zinc-500" title="Local time">
+          <span className="hidden w-12 text-xs tabular-nums text-zinc-500 sm:block" title="Local time">
             {mounted ? clock : ""}
           </span>
           <div className="relative ml-auto">

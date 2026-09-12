@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
-import type { AnalyticsSummary, Hotspot, Incident } from "@/lib/types";
+import type { AdminIncidentPage, AnalyticsSummary, Hotspot, Incident } from "@/lib/types";
 import { categoryLabel } from "@/lib/taxonomy";
 import { slaFor } from "@/lib/sla";
 import { Card } from "@/components/ui/card";
@@ -115,7 +115,7 @@ export default function DashboardPage() {
   });
   const recent = useQuery({
     queryKey: ["admin-recent"],
-    queryFn: () => apiFetch<Incident[]>("/admin/incidents"),
+    queryFn: () => apiFetch<AdminIncidentPage>("/admin/incidents"),
   });
   const hotspots = useQuery({
     queryKey: ["admin-hotspots"],
@@ -177,7 +177,7 @@ export default function DashboardPage() {
   const last7 = byDay.slice(-7);
   const weekTotal = count(last7);
 
-  const incidents = recent.data ?? [];
+  const incidents = recent.data?.items ?? [];
   const feed = incidents.slice(0, 6);
   const queue = incidents.filter((i) => i.status === "needs_review" || i.status === "escalated").slice(0, 5);
 

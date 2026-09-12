@@ -2,10 +2,10 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, buildQuery, getApiBase, getToken } from "@/lib/api";
-import type { DuplicatePair, Incident, Severity, StaffMember } from "@/lib/types";
+import type { AdminIncidentPage, DuplicatePair, Incident, Severity, StaffMember } from "@/lib/types";
 import { staffName } from "@/lib/types";
 import { categoryLabel } from "@/lib/taxonomy";
 import { slaFor, slaLabel } from "@/lib/sla";
@@ -15,6 +15,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 
 const FONT = { fontFamily: "Verdana, Geneva, sans-serif" } as const;
+const PAGE_SIZE = 25;
 
 const STATUSES = [
   "processing",
@@ -22,6 +23,7 @@ const STATUSES = [
   "verified",
   "rejected",
   "escalated",
+  "resolved",
   "awaiting_verification",
   "community_confirmed",
   "needs_follow_up",
@@ -33,13 +35,13 @@ const STATUS_LABELS: Record<string, string> = {
   verified: "Verified",
   rejected: "Rejected",
   escalated: "Escalated",
+  resolved: "Resolved",
   awaiting_verification: "Awaiting verification",
   community_confirmed: "Community confirmed",
   needs_follow_up: "Needs follow-up",
   closed: "Closed",
 };
 const SEVERITIES: Severity[] = ["low", "medium", "high", "critical"];
-const SEV_RANK: Record<Severity, number> = { critical: 0, high: 1, medium: 2, low: 3 };
 const SEV_BAR: Record<Severity, string> = {
   critical: "bg-red-500",
   high: "bg-orange-500",
@@ -48,6 +50,18 @@ const SEV_BAR: Record<Severity, string> = {
 };
 
 type SortKey = "newest" | "oldest" | "severity" | "action";
+type QueueKey = "" | "mine" | "unassigned";
+type Scope = {
+  q: string;
+  status: string;
+  severity: string;
+  queue: QueueKey;
+  sort: SortKey;
+  page: number;
+};
+type BulkAction =
+  | { kind: "status"; value: string; label: string }
+  | { kind: "assigned_to"; value: string; label: string };
 
 function timeAgo(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -61,22 +75,47 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
+function labelFor(value: string): string {
+  return STATUS_LABELS[value] ?? value.replaceAll("_", " ");
+}
+
+function readScope(params: Readonly<URLSearchParams>): Scope {
+  const sort = params.get("sort");
+  const page = Number(params.get("page"));
+  const queue = params.get("queue");
+  return {
+    q: params.get("q") ?? "",
+    status: params.get("status") ?? "",
+    severity: params.get("severity") ?? "",
+    queue: queue === "mine" || queue === "unassigned" ? queue : "",
+    sort: sort === "oldest" || sort === "severity" || sort === "action" ? sort : "newest",
+    page: Number.isInteger(page) && page > 0 ? page : 1,
+  };
+}
+
+function scopeQuery(scope: Scope): string {
+  return buildQuery({
+    q: scope.q || undefined,
+    status: scope.status || undefined,
+    severity: scope.severity || undefined,
+    queue: scope.queue || undefined,
+    sort: scope.sort === "newest" ? undefined : scope.sort,
+    page: String(scope.page),
+    page_size: String(PAGE_SIZE),
+  });
+}
+
 function thumbSrc(inc: Incident): string | null {
   if (!inc.photo_url) return null;
-  const t = typeof window !== "undefined" ? (getToken() ?? "") : "";
-  return `${getApiBase()}/admin/incidents/${inc.id}/photo?token=${t}`;
+  const token = typeof window !== "undefined" ? getToken() ?? "" : "";
+  return `${getApiBase()}/admin/incidents/${inc.id}/photo?token=${token}`;
 }
 
 function Thumb({ src }: { src: string | null }) {
   const [broken, setBroken] = useState(false);
-  // The backend serves a 1px placeholder when no real photo exists —
-  // treat tiny/broken images as "no photo" so rows never show color bars.
   if (!src || broken) {
     return (
-      <span
-        aria-hidden
-        className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-zinc-100 text-zinc-400"
-      >
+      <span aria-hidden className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md bg-zinc-100 text-zinc-400">
         <svg viewBox="0 0 20 20" fill="none" className="h-6 w-6">
           <rect x="2.5" y="4" width="15" height="11" rx="2" stroke="currentColor" strokeWidth="1.5" />
           <circle cx="7" cy="9" r="1.6" stroke="currentColor" strokeWidth="1.5" />
@@ -92,28 +131,38 @@ function Thumb({ src }: { src: string | null }) {
       alt=""
       loading="lazy"
       onError={() => setBroken(true)}
-      onLoad={(e) => {
-        if (e.currentTarget.naturalWidth <= 8) setBroken(true);
+      onLoad={(event) => {
+        if (event.currentTarget.naturalWidth <= 8) setBroken(true);
       }}
-      className="h-14 w-14 shrink-0 rounded-lg bg-zinc-100 object-cover"
+      className="h-12 w-12 shrink-0 rounded-md bg-zinc-100 object-cover"
     />
   );
 }
 
 function SkeletonRows() {
   return (
-    <div className="grid gap-3" aria-label="Loading incidents">
-      {[0, 1, 2].map((i) => (
-        <Card key={i} className="flex animate-pulse items-center gap-4">
-          <div className="h-14 w-14 shrink-0 rounded-lg bg-zinc-200" />
+    <div className="grid gap-2" aria-label="Loading incidents">
+      {[0, 1, 2, 3].map((item) => (
+        <Card key={item} className="flex animate-pulse items-center gap-3">
+          <div className="h-4 w-4 rounded bg-zinc-200" />
+          <div className="h-12 w-12 rounded-md bg-zinc-200" />
           <div className="flex-1 space-y-2">
             <div className="h-4 w-1/3 rounded bg-zinc-200" />
             <div className="h-3 w-2/3 rounded bg-zinc-100" />
           </div>
-          <div className="h-3 w-20 rounded bg-zinc-100" />
+          <div className="h-3 w-16 rounded bg-zinc-100" />
         </Card>
       ))}
     </div>
+  );
+}
+
+function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-md bg-[#e8f0e5] px-2 py-1 text-xs font-medium text-[#285e4a]">
+      {label}
+      <button type="button" aria-label={`Remove ${label}`} onClick={onRemove} className="rounded px-1 text-[#285e4a] transition hover:bg-[#d7e5d2] focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">×</button>
+    </span>
   );
 }
 
@@ -126,28 +175,20 @@ export default function IncidentsPage() {
 }
 
 function IncidentsInner() {
-  const qc = useQueryClient();
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [status, setStatus] = useState("");
-  const [severity, setSeverity] = useState("");
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<SortKey>(
-    searchParams.get("sort") === "action" ? "action" : "newest"
-  );
-  const [mineOnly, setMineOnly] = useState(false);
+  const qc = useQueryClient();
+  const scope = useMemo(() => readScope(searchParams), [searchParams]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [selectionMode, setSelectionMode] = useState<"page" | "filtered" | null>(null);
   const [bulkAssignee, setBulkAssignee] = useState("");
-  const [toast, setToast] = useState<{ msg: string; undo: () => void } | null>(null);
+  const [pendingBulk, setPendingBulk] = useState<BulkAction | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
 
   const { data, isLoading, error, refetch, isFetching } = useQuery({
-    queryKey: ["admin-incidents", status, severity],
-    queryFn: () =>
-      apiFetch<Incident[]>(`/admin/incidents${buildQuery({ status, severity })}`),
-  });
-  const me = useQuery({
-    queryKey: ["admin-me"],
-    queryFn: () => apiFetch<{ id: string; email: string; role: string }>("/admin/me"),
-    retry: false,
+    queryKey: ["admin-incidents", scope],
+    queryFn: () => apiFetch<AdminIncidentPage>(`/admin/incidents${scopeQuery(scope)}`),
   });
   const staff = useQuery({
     queryKey: ["admin-staff"],
@@ -160,426 +201,216 @@ function IncidentsInner() {
     retry: false,
   });
 
+  const replaceScope = (updates: Partial<Scope>) => {
+    const next = { ...scope, ...updates };
+    const query = scopeQuery(next).replace("&page_size=25", "").replace("?page=1&page_size=25", "");
+    router.replace(`${pathname}${query}`, { scroll: false });
+  };
+
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 6000);
-    return () => clearTimeout(t);
+    const timer = window.setTimeout(() => setToast(null), 5000);
+    return () => window.clearTimeout(timer);
   }, [toast]);
 
+  useEffect(() => {
+    setSelected({});
+    setSelectionMode(null);
+    setPendingBulk(null);
+    setBulkAssignee("");
+  }, [scope.q, scope.status, scope.severity, scope.queue, scope.sort, scope.page]);
+
+  useEffect(() => {
+    if (data && data.page !== scope.page) replaceScope({ page: data.page });
+  }, [data, scope.page]);
+
   const staffById = useMemo(() => {
-    const m = new Map<string, StaffMember>();
-    (staff.data ?? []).forEach((s) => m.set(s.id, s));
-    return m;
+    const map = new Map<string, StaffMember>();
+    (staff.data ?? []).forEach((member) => map.set(member.id, member));
+    return map;
   }, [staff.data]);
 
   const ownerName = (id: string | null | undefined) => {
-    if (!id) return null;
-    const s = staffById.get(id);
-    return staffName(s?.email, id);
+    if (!id) return "Unassigned";
+    const member = staffById.get(id);
+    return staffName(member?.email, id);
   };
 
   const dupCount = useMemo(() => {
-    const m = new Map<string, DuplicatePair[]>();
-    (dupes.data ?? []).forEach((p) => {
-      for (const id of [p.a_id, p.b_id]) {
-        const list = m.get(id) ?? [];
-        list.push(p);
-        m.set(id, list);
+    const map = new Map<string, DuplicatePair[]>();
+    (dupes.data ?? []).forEach((pair) => {
+      for (const id of [pair.a_id, pair.b_id]) {
+        const list = map.get(id) ?? [];
+        list.push(pair);
+        map.set(id, list);
       }
     });
-    return m;
+    return map;
   }, [dupes.data]);
 
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const filtered = (data ?? []).filter((i) => {
-      if (mineOnly && me.data && i.assigned_to !== me.data.id) return false;
-      return (
-        !q ||
-        i.title.toLowerCase().includes(q) ||
-        (i.description ?? "").toLowerCase().includes(q)
-      );
-    });
-    return [...filtered].sort((a, b) => {
-      if (sort === "oldest")
-        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-      if (sort === "severity") return SEV_RANK[a.severity] - SEV_RANK[b.severity];
-      if (sort === "action") {
-        const sa = slaFor(a.created_at, a.severity, a.status);
-        const sb = slaFor(b.created_at, b.severity, b.status);
-        const rank = (s: typeof sa) => (!s ? 3 : s.state === "overdue" ? 0 : s.state === "breaching" ? 1 : 2);
-        const d = rank(sa) - rank(sb);
-        if (d !== 0) return d;
-        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-      }
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-    });
-  }, [data, query, sort, mineOnly, me.data]);
-
-  const selectedIds = useMemo(
-    () => rows.filter((r) => selected[r.id]).map((r) => r.id),
-    [rows, selected]
-  );
-  const allChecked = rows.length > 0 && rows.every((r) => selected[r.id]);
+  const rows = data?.items ?? [];
+  const selectedIds = rows.filter((row) => selected[row.id]).map((row) => row.id);
+  const pageSelected = rows.length > 0 && rows.every((row) => selected[row.id]);
+  const hasScope = !!scope.q || !!scope.status || !!scope.severity || !!scope.queue || scope.sort !== "newest" || scope.page > 1;
+  const total = data?.total ?? 0;
+  const totalPages = data?.total_pages ?? 0;
+  const firstResult = total === 0 ? 0 : (scope.page - 1) * PAGE_SIZE + 1;
+  const lastResult = total === 0 ? 0 : Math.min(scope.page * PAGE_SIZE, total);
 
   const refreshAll = () => {
     qc.invalidateQueries({ queryKey: ["admin-incidents"] });
+    qc.invalidateQueries({ queryKey: ["admin-recent"] });
     qc.invalidateQueries({ queryKey: ["admin-duplicates"] });
     qc.invalidateQueries({ queryKey: ["admin-staff"] });
+    qc.invalidateQueries({ queryKey: ["sidebar-needs-review"] });
   };
 
   const bulk = useMutation({
-    mutationFn: (body: Record<string, unknown>) =>
-      apiFetch<{ updated: number }>(`/admin/incidents/bulk`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: refreshAll,
+    mutationFn: (body: Record<string, unknown>) => apiFetch<{ matched: number; updated: number }>("/admin/incidents/bulk", { method: "POST", body: JSON.stringify(body) }),
+    onSuccess: (result) => {
+      setSelected({});
+      setSelectionMode(null);
+      setBulkAssignee("");
+      setPendingBulk(null);
+      setToast(`${result.updated} of ${result.matched} incident${result.matched === 1 ? "" : "s"} updated`);
+      refreshAll();
+    },
   });
 
-  const patchOne = (id: string, body: Record<string, unknown>) =>
-    apiFetch(`/admin/incidents/${id}`, { method: "PATCH", body: JSON.stringify(body) });
-
-  /** Restore a snapshot of rows (for bulk undo). Sequential, best-effort. */
-  const restoreSnapshot = async (snap: Incident[]) => {
-    for (const s of snap) {
-      try {
-        await patchOne(s.id, { status: s.status, severity: s.severity });
-        await patchOne(s.id, { assigned_to: s.assigned_to ?? null });
-      } catch {
-        /* keep going */
-      }
-    }
-    refreshAll();
+  const currentFilterPayload = {
+    q: scope.q || null,
+    status: scope.status || null,
+    severity: scope.severity || null,
+    queue: scope.queue || null,
   };
 
-  const runBulk = (body: Record<string, unknown>, label: string) => {
-    const snap = rows.filter((r) => selected[r.id]);
-    bulk.mutate(
-      { ids: selectedIds, ...body },
-      {
-        onSuccess: () => {
-          setSelected({});
-          setBulkAssignee("");
-          setToast({ msg: label, undo: () => restoreSnapshot(snap) });
-        },
-      }
-    );
+  const confirmBulk = () => {
+    if (!pendingBulk || selectionMode === null) return;
+    const target = selectionMode === "filtered" ? { scope: "filtered", filters: currentFilterPayload } : { ids: selectedIds };
+    bulk.mutate({ ...target, [pendingBulk.kind]: pendingBulk.value });
   };
-
-  const hasFilters = !!status || !!severity || !!query || mineOnly;
 
   const clearAll = () => {
-    setStatus("");
-    setSeverity("");
-    setQuery("");
-    setMineOnly(false);
+    setSelected({});
+    setSelectionMode(null);
+    router.replace(pathname, { scroll: false });
   };
 
-  const selectCls =
-    "rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm capitalize outline-none focus:border-[#2a4a33]";
+  const clearOne = (key: keyof Scope) => {
+    if (key === "q" || key === "status" || key === "severity" || key === "queue") replaceScope({ [key]: "", page: 1 });
+    else if (key === "sort") replaceScope({ sort: "newest", page: 1 });
+    else replaceScope({ page: 1 });
+  };
+
+  const selectPage = (checked: boolean) => {
+    if (!checked) {
+      setSelected({});
+      setSelectionMode(null);
+      return;
+    }
+    const next: Record<string, boolean> = {};
+    rows.forEach((row) => (next[row.id] = true));
+    setSelected(next);
+    setSelectionMode("page");
+  };
+
+  const selectRow = (id: string, checked: boolean) => {
+    setSelectionMode("page");
+    setSelected((current) => {
+      const next = { ...current, [id]: checked };
+      if (!checked) delete next[id];
+      return next;
+    });
+  };
+
+  const selectionCount = selectionMode === "filtered" ? total : selectedIds.length;
+  const selectionText = selectionMode === "filtered" ? `All ${total} matching incidents selected` : `${selectionCount} incident${selectionCount === 1 ? "" : "s"} selected on this page`;
+  const selectCls = "rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm capitalize outline-none transition focus:border-[#2a4a33] focus:ring-2 focus:ring-[#dce8dc]";
 
   return (
     <div className="space-y-4" style={FONT}>
-      {/* Toolbar — page title lives in the shell banner */}
-      <Card className="space-y-3">
+      <Card className="space-y-4">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-52 flex-1">
-            <label htmlFor="inc-search" className="mb-1 block text-xs font-medium text-zinc-500">
-              Search
-            </label>
-            <Input
-              id="inc-search"
-              placeholder="Search title or description…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="focus:border-[#2a4a33]"
-            />
+          <div className="w-full min-w-0 sm:min-w-56 sm:flex-1">
+            <label htmlFor="inc-search" className="mb-1 block text-xs font-medium text-zinc-500">Search</label>
+            <Input id="inc-search" placeholder="Search title or description…" value={scope.q} onChange={(event) => replaceScope({ q: event.target.value.slice(0, 100), page: 1 })} className="focus:border-[#2a4a33] focus:ring-[#dce8dc]" />
           </div>
-          <div>
-            <label htmlFor="inc-status" className="mb-1 block text-xs font-medium text-zinc-500">
-              Status
-            </label>
-            <select
-              id="inc-status"
-              className={selectCls}
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-            >
+          <div className="w-full sm:w-auto">
+            <label htmlFor="inc-status" className="mb-1 block text-xs font-medium text-zinc-500">Status</label>
+            <select id="inc-status" className={`${selectCls} w-full sm:w-auto`} value={scope.status} onChange={(event) => replaceScope({ status: event.target.value, page: 1 })}>
               <option value="">All statuses</option>
-              {STATUSES.map((s) => (
-                <option key={s} value={s} className="capitalize">
-                  {STATUS_LABELS[s] ?? s}
-                </option>
-              ))}
+              {STATUSES.map((value) => <option key={value} value={value}>{STATUS_LABELS[value]}</option>)}
             </select>
           </div>
-          <div>
-            <label htmlFor="inc-sev" className="mb-1 block text-xs font-medium text-zinc-500">
-              Severity
-            </label>
-            <select
-              id="inc-sev"
-              className={selectCls}
-              value={severity}
-              onChange={(e) => setSeverity(e.target.value)}
-            >
+          <div className="w-full sm:w-auto">
+            <label htmlFor="inc-sev" className="mb-1 block text-xs font-medium text-zinc-500">Severity</label>
+            <select id="inc-sev" className={`${selectCls} w-full sm:w-auto`} value={scope.severity} onChange={(event) => replaceScope({ severity: event.target.value, page: 1 })}>
               <option value="">All severities</option>
-              {SEVERITIES.map((s) => (
-                <option key={s} value={s} className="capitalize">
-                  {s}
-                </option>
-              ))}
+              {SEVERITIES.map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
           </div>
-          <div>
-            <label htmlFor="inc-sort" className="mb-1 block text-xs font-medium text-zinc-500">
-              Sort
-            </label>
-            <select
-              id="inc-sort"
-              className={selectCls}
-              value={sort}
-              onChange={(e) => setSort(e.target.value as SortKey)}
-            >
+          <div className="w-full sm:w-auto">
+            <label htmlFor="inc-queue" className="mb-1 block text-xs font-medium text-zinc-500">Queue</label>
+            <select id="inc-queue" className={`${selectCls} w-full sm:w-auto`} value={scope.queue} onChange={(event) => replaceScope({ queue: event.target.value as QueueKey, page: 1 })}>
+              <option value="">All incidents</option>
+              <option value="mine">My queue — open and assigned to you</option>
+              <option value="unassigned">Unassigned — open with no owner</option>
+            </select>
+          </div>
+          <div className="w-full sm:w-auto">
+            <label htmlFor="inc-sort" className="mb-1 block text-xs font-medium text-zinc-500">Sort</label>
+            <select id="inc-sort" className={`${selectCls} w-full sm:w-auto`} value={scope.sort} onChange={(event) => replaceScope({ sort: event.target.value as SortKey, page: 1 })}>
               <option value="newest">Newest first</option>
               <option value="oldest">Oldest first</option>
               <option value="severity">Highest severity</option>
               <option value="action">Needs action</option>
             </select>
           </div>
-          <label className="flex cursor-pointer items-center gap-1.5 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm">
-            <input
-              type="checkbox"
-              checked={mineOnly}
-              onChange={(e) => setMineOnly(e.target.checked)}
-              className="accent-[#2a4a33]"
-            />
-            My queue{me.data ? ` (${(data ?? []).filter((r) => r.assigned_to === me.data.id).length})` : ""}
-          </label>
-          {hasFilters && (
-            <button
-              onClick={clearAll}
-              className="inline-flex items-center justify-center rounded-md bg-white px-4 py-2 text-sm font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-100"
-            >
-              Clear filters
-            </button>
-          )}
+          {hasScope && <button type="button" onClick={clearAll} className="inline-flex items-center justify-center rounded-md bg-white px-4 py-2 text-sm font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 transition hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Clear all</button>}
         </div>
-        <p className="text-sm text-zinc-500" aria-live="polite">
-          {isLoading ? (
-            "Loading incidents…"
-          ) : (
-            <>
-              <strong className="text-zinc-800">{rows.length}</strong>{" "}
-              {rows.length === 1 ? "incident" : "incidents"}
-              {(dupes.data ?? []).length > 0 && (
-                <span className="ml-2 rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-800">
-                  {(dupes.data ?? []).length} suspected duplicate pairs
-                </span>
-              )}
-              {isFetching && !isLoading && " · refreshing…"}
-            </>
-          )}
-        </p>
+
+        <div className="flex flex-wrap items-center gap-2" aria-label="Active incident scope">
+          {scope.q && <FilterChip label={`Search: ${scope.q}`} onRemove={() => clearOne("q")} />}
+          {scope.status && <FilterChip label={`Status: ${labelFor(scope.status)}`} onRemove={() => clearOne("status")} />}
+          {scope.severity && <FilterChip label={`Severity: ${scope.severity}`} onRemove={() => clearOne("severity")} />}
+          {scope.queue === "mine" && <FilterChip label="Queue: My queue — open and assigned to you" onRemove={() => clearOne("queue")} />}
+          {scope.queue === "unassigned" && <FilterChip label="Queue: Unassigned — open with no owner" onRemove={() => clearOne("queue")} />}
+          {scope.sort !== "newest" && <FilterChip label={`Sort: ${scope.sort === "action" ? "Needs action" : scope.sort}`} onRemove={() => clearOne("sort")} />}
+          {!hasScope && <span className="text-xs text-zinc-500">All incidents · newest first</span>}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-zinc-100 pt-3">
+          <p className="text-sm text-zinc-500" aria-live="polite">{isLoading ? "Loading incidents…" : `Showing ${firstResult}–${lastResult} of ${total} incident${total === 1 ? "" : "s"}`}{isFetching && !isLoading && <span className="ml-2 text-xs text-zinc-400">Refreshing…</span>}</p>
+          {(dupes.data ?? []).length > 0 && <span className="rounded-md bg-purple-50 px-2 py-1 text-xs font-medium text-purple-800">{dupes.data?.length} suspected duplicate pairs</span>}
+        </div>
       </Card>
 
-      {/* Bulk action bar */}
-      {selectedIds.length > 0 && (
-        <Card className="flex flex-wrap items-center gap-2 border-[#2a4a33] bg-[#f2f6f0]">
-          <strong className="text-sm">{selectedIds.length} selected</strong>
-          {(
-            [
-              ["verified", "Approve"],
-              ["rejected", "Reject"],
-              ["escalated", "Escalate"],
-            ] as const
-          ).map(([s, label]) => (
-            <button
-              key={s}
-              disabled={bulk.isPending}
-              onClick={() => runBulk({ status: s }, `${selectedIds.length} set to ${s}`)}
-              className="inline-flex items-center justify-center rounded-md bg-[#14231a] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#2a4a33] disabled:opacity-50"
-            >
-              {label}
-            </button>
-          ))}
-          <select
-            aria-label="Bulk assign to staff"
-            className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-[#2a4a33]"
-            value={bulkAssignee}
-            onChange={(e) => setBulkAssignee(e.target.value)}
-          >
-            <option value="">Assign to…</option>
-            {(staff.data ?? []).map((s) => (
-              <option key={s.id} value={s.id}>
-                {staffName(s.email, s.id)} ({s.role})
-              </option>
-            ))}
-          </select>
-          <button
-            disabled={!bulkAssignee || bulk.isPending}
-            onClick={() => runBulk({ assigned_to: bulkAssignee }, `${selectedIds.length} assigned`)}
-            className="inline-flex items-center justify-center rounded-md bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-100 disabled:opacity-50"
-          >
-            Assign
-          </button>
-          <button
-            onClick={() => setSelected({})}
-            className="ml-auto text-sm text-zinc-500 hover:text-zinc-800"
-          >
-            Clear selection
-          </button>
+      {selectionMode && selectionCount > 0 && (
+        <Card className="space-y-3 border-[#2a4a33] bg-[#f2f6f0]" role="region" aria-label="Bulk actions">
+          <div className="flex flex-wrap items-center gap-2">
+            <strong className="mr-2 text-sm">{selectionText}</strong>
+            {([["verified", "Approve"], ["rejected", "Reject"], ["escalated", "Escalate"]] as const).map(([value, label]) => <button key={value} type="button" disabled={bulk.isPending} onClick={() => setPendingBulk({ kind: "status", value, label })} className="inline-flex items-center justify-center rounded-md bg-[#14231a] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[#2a4a33] active:translate-y-px disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">{label}</button>)}
+            <select aria-label="Bulk assign to staff" className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-[#2a4a33] focus:ring-2 focus:ring-[#dce8dc]" value={bulkAssignee} onChange={(event) => setBulkAssignee(event.target.value)}>
+              <option value="">Assign to…</option>
+              {(staff.data ?? []).map((member) => <option key={member.id} value={member.id}>{staffName(member.email, member.id)} ({member.role})</option>)}
+            </select>
+            <button type="button" disabled={!bulkAssignee || bulk.isPending} onClick={() => setPendingBulk({ kind: "assigned_to", value: bulkAssignee, label: "Assign" })} className="inline-flex items-center justify-center rounded-md bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 transition hover:bg-zinc-100 active:translate-y-px disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Assign</button>
+            <button type="button" onClick={() => { setSelected({}); setSelectionMode(null); setBulkAssignee(""); }} className="ml-auto text-sm text-zinc-500 transition hover:text-zinc-800 focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Clear selection</button>
+          </div>
+          {selectionMode === "page" && pageSelected && total > rows.length && <button type="button" onClick={() => setSelectionMode("filtered")} className="text-left text-sm font-medium text-[#285e4a] underline decoration-[#9bbb91] underline-offset-2 hover:text-[#14231a] focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Select all {total} matching incidents</button>}
+          {pendingBulk && <div className="flex flex-wrap items-center gap-3 border-t border-[#cbdcc6] pt-3" role="alert"><p className="max-w-2xl flex-1 text-sm text-zinc-700">Confirm <strong>{pendingBulk.label.toLowerCase()}</strong> for <strong>{selectionCount}</strong> incident{selectionCount === 1 ? "" : "s"} {selectionMode === "filtered" ? "matching the current filters" : "on this page"}.</p><button type="button" onClick={() => setPendingBulk(null)} disabled={bulk.isPending} className="rounded-md bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Cancel</button><button type="button" onClick={confirmBulk} disabled={bulk.isPending} className="rounded-md bg-[#14231a] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#2a4a33] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">{bulk.isPending ? "Applying…" : `Confirm ${pendingBulk.label.toLowerCase()}`}</button></div>}
+          {bulk.error && <p className="text-sm text-red-700" role="alert">Bulk action failed: {(bulk.error as Error).message}</p>}
         </Card>
       )}
 
       {isLoading && <SkeletonRows />}
+      {error && !isLoading && <Card className="border-red-200 bg-red-50 text-center"><p className="text-sm text-red-700">Couldn’t load incidents: {(error as Error).message}</p><Button onClick={() => refetch()} className="mt-3 bg-[#14231a] hover:bg-[#2a4a33]">Retry</Button></Card>}
+      {!isLoading && !error && rows.length === 0 && <Card className="py-10 text-center"><svg viewBox="0 0 48 48" fill="none" className="mx-auto h-12 w-12 text-zinc-300" aria-hidden><circle cx="22" cy="22" r="12" stroke="currentColor" strokeWidth="3" /><path d="M31 31l9 9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" /></svg><p className="mt-3 font-medium text-zinc-800">No incidents match this scope</p><p className="mx-auto mt-1 max-w-md text-sm text-zinc-500">Try changing the filters or clear all to return to the full queue.</p>{hasScope && <Button onClick={clearAll} className="mt-4 bg-[#14231a] hover:bg-[#2a4a33]">Clear all</Button>}</Card>}
 
-      {error && !isLoading && (
-        <Card className="border-red-200 bg-red-50 text-center">
-          <p className="text-sm text-red-700">Couldn't load incidents: {(error as Error).message}</p>
-          <Button onClick={() => refetch()} className="mt-3">
-            Retry
-          </Button>
-        </Card>
-      )}
+      {!isLoading && !error && rows.length > 0 && <section aria-label="Incident results" className="space-y-2"><div className="flex items-center gap-2 px-1 text-xs text-zinc-500"><input type="checkbox" aria-label={`Select page (${rows.length})`} checked={pageSelected} onChange={(event) => selectPage(event.target.checked)} className="h-4 w-4 accent-[#2a4a33]" /><span>Select page ({rows.length})</span></div><div className="grid gap-2">{rows.map((inc) => { const src = thumbSrc(inc); const location = inc.address ?? `${inc.lat.toFixed(3)}, ${inc.lng.toFixed(3)}`; const sla = slaFor(inc.created_at, inc.severity, inc.status); const duplicates = dupCount.get(inc.id) ?? []; const owner = ownerName(inc.assigned_to); return <Card key={inc.id} className="relative overflow-hidden p-3 transition-shadow hover:shadow-md"><span aria-hidden className={`absolute inset-y-0 left-0 w-1 ${SEV_BAR[inc.severity]}`} /><div className="grid gap-3 pl-2 xl:grid-cols-[auto_auto_minmax(18rem,1fr)_minmax(130px,auto)_minmax(105px,auto)_auto] xl:items-center"><input type="checkbox" aria-label={`Select ${inc.title}`} checked={!!selected[inc.id]} onChange={(event) => selectRow(inc.id, event.target.checked)} className="h-4 w-4 accent-[#2a4a33]" /><Thumb src={src} /><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><Link href={`/incidents/${inc.id}`} className="max-w-full font-semibold text-zinc-900 underline-offset-2 transition hover:text-[#2a4a33] hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">{inc.title}</Link>{duplicates.length > 0 && <Link href={`/incidents/${inc.id}#duplicates`} title={duplicates.map((item) => `Score ${item.score} · ${item.distance_m}m · ${item.hours_apart}h apart`).join("\n")} className="rounded-md bg-purple-50 px-1.5 py-0.5 text-[11px] font-bold text-purple-800 hover:bg-purple-100 focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">{duplicates.length} duplicate{duplicates.length > 1 ? "s" : ""}</Link>}</div><p className="mt-0.5 truncate text-xs text-zinc-500" title={location}>{location}</p><p className="mt-1 line-clamp-2 max-w-2xl text-sm leading-relaxed text-zinc-600">{inc.description || "No description provided."}</p></div><div className="flex flex-wrap items-center gap-1.5 xl:justify-end">{sla && sla.state !== "ok" && <span title={slaLabel(sla)} className={`rounded-md px-2 py-1 text-xs font-bold ${sla.state === "overdue" ? "bg-red-600 text-white" : "bg-amber-100 text-amber-800"}`}>{sla.state === "overdue" ? "Overdue" : "Breaching"}</span>}<Badge value={inc.status} /><Badge value={inc.severity} /></div><div className="text-xs text-zinc-500"><span className="text-[11px] uppercase tracking-wide text-zinc-400">Owner</span><span className="mt-0.5 block truncate" title={owner}>{owner}</span></div><div className="flex items-center justify-between gap-3 text-xs text-zinc-500 xl:block xl:text-right"><span className="text-[11px] uppercase tracking-wide text-zinc-400">Age</span><span className="mt-0.5 block tabular-nums" title={new Date(inc.created_at).toLocaleString()}>{timeAgo(inc.created_at)}</span><Link href={`/incidents/${inc.id}`} className="mt-1 inline-block font-medium text-[#285e4a] hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Open incident</Link></div></div></Card>; })}</div></section>}
 
-      {!isLoading && !error && rows.length === 0 && (
-        <Card className="py-10 text-center">
-          <svg viewBox="0 0 48 48" fill="none" className="mx-auto h-12 w-12 text-zinc-300" aria-hidden>
-            <circle cx="22" cy="22" r="12" stroke="currentColor" strokeWidth="3" />
-            <path d="M31 31l9 9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-          </svg>
-          <p className="mt-3 font-medium text-zinc-800">No incidents match</p>
-          <p className="mt-1 text-sm text-zinc-500">
-            {hasFilters ? "Try widening the search or clearing the filters." : "Nothing reported yet."}
-          </p>
-          {hasFilters && (
-            <Button onClick={clearAll} className="mt-4">
-              Reset filters
-            </Button>
-          )}
-        </Card>
-      )}
-
-      <div className="grid gap-3">
-        {rows.length > 0 && (
-          <label className="flex cursor-pointer items-center gap-2 text-xs text-zinc-500">
-            <input
-              type="checkbox"
-              checked={allChecked}
-              onChange={(e) => {
-                const next: Record<string, boolean> = {};
-                if (e.target.checked) rows.forEach((r) => (next[r.id] = true));
-                setSelected(next);
-              }}
-              className="accent-[#2a4a33]"
-            />
-            Select all {rows.length} shown
-          </label>
-        )}
-        {rows.map((inc) => {
-          const src = thumbSrc(inc);
-          const loc = inc.address ?? `${inc.lat.toFixed(3)}, ${inc.lng.toFixed(3)}`;
-          const sla = slaFor(inc.created_at, inc.severity, inc.status);
-          const owner = ownerName(inc.assigned_to);
-          const dups = dupCount.get(inc.id) ?? [];
-          return (
-            <Card key={inc.id} className="relative overflow-hidden">
-              <span
-                aria-hidden
-                className={`absolute inset-y-0 left-0 w-1.5 ${SEV_BAR[inc.severity]}`}
-              />
-              <div className="flex items-center gap-4 pl-2">
-                <input
-                  type="checkbox"
-                  aria-label={`Select ${inc.title}`}
-                  checked={!!selected[inc.id]}
-                  onChange={(e) =>
-                    setSelected((m) => ({ ...m, [inc.id]: e.target.checked }))
-                  }
-                  className="h-4 w-4 shrink-0 accent-[#2a4a33]"
-                />
-                <Thumb src={src} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <Link
-                      href={`/incidents/${inc.id}`}
-                      className="truncate font-semibold text-zinc-900 hover:text-[#2a4a33] hover:no-underline"
-                    >
-                      {inc.title}
-                    </Link>
-                  </div>
-                  <p className="mt-0.5 truncate text-sm text-zinc-500">
-                    {loc}
-                    {inc.description ? ` · ${inc.description}` : ""}
-                  </p>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5 capitalize">
-                    <Badge value={inc.status} />
-                    <Badge value={inc.severity} />
-                    <span className="rounded-full bg-[#e8f0e5] px-2 py-0.5 text-xs font-medium normal-case text-[#285e4a]">
-                      {categoryLabel(inc.ai_analysis?.category)}
-                    </span>
-                    {sla && sla.state !== "ok" && (
-                      <span
-                        title={slaLabel(sla)}
-                        className={`rounded-full px-2 py-0.5 text-xs font-bold normal-case ${
-                          sla.state === "overdue"
-                            ? "bg-red-600 text-white"
-                            : "bg-amber-100 text-amber-800"
-                        }`}
-                      >
-                        {sla.state === "overdue" ? "Overdue" : "Breaching"}
-                      </span>
-                    )}
-                    {dups.length > 0 && (
-                      <Link
-                        href={`/incidents/${inc.id}#duplicates`}
-                        title={dups
-                          .map((d) => `Score ${d.score} · ${d.distance_m}m · ${d.hours_apart}h apart`)
-                          .join("\n")}
-                        className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-bold normal-case text-purple-800 hover:bg-purple-200"
-                      >
-                        {dups.length} possible duplicate{dups.length > 1 ? "s" : ""}
-                      </Link>
-                    )}
-                    <span className="inline-flex items-center gap-1 text-xs normal-case text-zinc-500" title={owner ? `Assigned to ${owner}` : "Unassigned"}>
-                      <span aria-hidden className={`inline-block h-1.5 w-1.5 rounded-full ${owner ? "bg-green-500" : "bg-zinc-300"}`} />
-                      {owner ?? "Unassigned"}
-                    </span>
-                  </div>
-                </div>
-                <span
-                  className="shrink-0 text-xs tabular-nums text-zinc-500"
-                  title={new Date(inc.created_at).toLocaleString()}
-                >
-                  {timeAgo(inc.created_at)}
-                </span>
-              </div>
-            </Card>
-          );
-        })}
-      </div>
-
-      {/* Toast */}
-      {toast && (
-        <div
-          role="status"
-          className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-zinc-900 px-4 py-2.5 text-sm text-white shadow-lg"
-        >
-          {bulk.isPending ? "Applying…" : toast.msg}
-          <button
-            onClick={() => {
-              const t = toast;
-              setToast(null);
-              t.undo();
-            }}
-            className="rounded px-2 py-0.5 font-medium text-amber-300 hover:bg-white/10"
-          >
-            Undo
-          </button>
-        </div>
-      )}
+      {!isLoading && !error && totalPages > 0 && <nav aria-label="Incident pages" className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 pt-3"><p className="text-xs text-zinc-500">Page {scope.page} of {totalPages}</p><div className="flex items-center gap-2"><button type="button" disabled={scope.page <= 1} onClick={() => replaceScope({ page: scope.page - 1 })} className="rounded-md bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 transition hover:bg-zinc-100 disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Previous</button><button type="button" disabled={scope.page >= totalPages} onClick={() => replaceScope({ page: scope.page + 1 })} className="rounded-md bg-[#14231a] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[#2a4a33] disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Next</button></div></nav>}
+      {toast && <div role="status" className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-zinc-900 px-4 py-2.5 text-sm text-white shadow-lg">{bulk.isPending ? "Applying…" : toast}</div>}
     </div>
   );
 }
