@@ -191,13 +191,13 @@ function ActionPanel({ action }: { action: ActionCounts }) {
 
 function SignalRow({ signal }: { signal: Hotspot }) {
   return (
-    <li className="grid gap-3 border-t border-zinc-100 py-3 first:border-t-0 lg:grid-cols-[minmax(8rem,1.25fr)_minmax(7rem,1fr)_4rem_5rem_6.5rem_auto] lg:items-center">
+    <li className="grid gap-3 border-t border-zinc-100 py-3 first:border-t-0 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_4.5rem_7rem_8rem_7.25rem] lg:items-center">
       <div className="min-w-0"><p className="truncate text-sm font-semibold text-[#14231a]">{categoryLabel(signal.category)}</p><p className="mt-0.5 text-xs text-zinc-500">Recurring signal</p></div>
-      <div><p className="text-sm font-semibold text-[#285e4a]">{signal.persistence_score} score</p><p className="text-xs capitalize text-zinc-500">{signal.trend} trend</p></div>
-      <div><p className="text-[10px] uppercase tracking-wide text-zinc-400 lg:hidden">Reports</p><p className="text-sm font-semibold tabular-nums text-zinc-800">{signal.report_count}</p></div>
-      <div><p className="text-[10px] uppercase tracking-wide text-zinc-400 lg:hidden">Contributors</p><p className="text-sm font-semibold tabular-nums text-zinc-800">{signal.unique_contributors}</p></div>
-      <div><p className="text-[10px] uppercase tracking-wide text-zinc-400 lg:hidden">Last observed</p><p className="text-xs text-zinc-600">{new Date(signal.last_observed).toLocaleDateString([], { month: "short", day: "numeric" })}</p></div>
-      <Link href={signalHref(signal.id, { ...DEFAULT_FILTERS, window_days: 30 })} className="text-xs font-semibold text-[#285e4a] underline-offset-2 hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Open evidence →</Link>
+      <div className="min-w-0"><p className="text-sm font-semibold text-[#285e4a]">{signal.persistence_score} score</p><p className="text-xs capitalize text-zinc-500">{signal.trend} trend</p></div>
+      <div className="min-w-0"><p className="text-[10px] uppercase tracking-wide text-zinc-400 lg:hidden">Reports</p><p className="text-sm font-semibold tabular-nums text-zinc-800">{signal.report_count}</p></div>
+      <div className="min-w-0"><p className="text-[10px] uppercase tracking-wide text-zinc-400 lg:hidden">Contributors</p><p className="text-sm font-semibold tabular-nums text-zinc-800">{signal.unique_contributors}</p></div>
+      <div className="min-w-0"><p className="text-[10px] uppercase tracking-wide text-zinc-400 lg:hidden">Last observed</p><p className="text-xs text-zinc-600">{new Date(signal.last_observed).toLocaleDateString([], { month: "short", day: "numeric" })}</p></div>
+      <Link href={signalHref(signal.id, { ...DEFAULT_FILTERS, window_days: 30 })} className="min-w-0 whitespace-nowrap text-xs font-semibold text-[#285e4a] underline-offset-2 hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Open evidence →</Link>
     </li>
   );
 }
@@ -324,8 +324,8 @@ export default function DashboardPage() {
           <p className="mt-4 rounded-lg bg-zinc-50 p-3 text-sm text-zinc-500">No recurring signals yet — verified reports will surface here.</p>
         ) : (
           <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50/70 px-3">
-            <div className="hidden gap-3 border-b border-zinc-200 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 lg:grid lg:grid-cols-[minmax(8rem,1.25fr)_minmax(7rem,1fr)_4rem_5rem_6.5rem_auto]">
-              <span>Category</span><span>Priority</span><span>Reports</span><span>Contributors</span><span>Last observed</span><span>Action</span>
+            <div className="hidden gap-3 border-b border-zinc-200 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 lg:grid lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_4.5rem_7rem_8rem_7.25rem] lg:items-center">
+              <span className="min-w-0 whitespace-nowrap">Category</span><span className="min-w-0 whitespace-nowrap">Priority</span><span className="min-w-0 whitespace-nowrap">Reports</span><span className="min-w-0 whitespace-nowrap">Contributors</span><span className="min-w-0 whitespace-nowrap">Last observed</span><span className="min-w-0 whitespace-nowrap">Action</span>
             </div>
             <ul aria-label="Recurring environmental signals">{(hotspots.data ?? []).map((spot) => <SignalRow key={spot.id} signal={spot} />)}</ul>
           </div>
