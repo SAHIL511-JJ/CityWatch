@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from datetime import datetime, timezone
-from sqlalchemy import cast
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import cast, func
 from sqlalchemy.orm import Session
 from geoalchemy2 import Geography
 
-from .models import Incident
+from .models import Incident, IncidentNote
 from .taxonomy import canonical_category
 
 
@@ -62,12 +62,21 @@ def _candidate_rows(
     center_lat: float | None = None,
     center_lng: float | None = None,
     radius_km: float | None = None,
+    since: datetime | None = None,
+    category: str | None = None,
+    severity: str | None = None,
 ) -> list[Incident]:
     q = (
         db.query(Incident)
         .filter(Incident.status == "verified")
         .order_by(Incident.created_at.asc(), Incident.id.asc())
     )
+    if since is not None:
+        q = q.filter(Incident.created_at >= since)
+    if severity is not None:
+        q = q.filter(Incident.severity == severity)
+    # Category is stored in ai_analysis for the current schema, so it remains
+    # a portable Python filter after the bounded candidate query.
     # Use the indexed Supabase PostGIS geography column for map-centred reads.
     if center_lat is not None and center_lng is not None and radius_km is not None:
         from geoalchemy2.functions import ST_DWithin, ST_MakePoint, ST_SetSRID
@@ -77,7 +86,15 @@ def _candidate_rows(
             Geography("POINT", srid=4326),
         )
         q = q.filter(ST_DWithin(Incident.location, point, radius_km * 1000))
-    return q.limit(MAX_CANDIDATES).all()
+    rows = q.limit(MAX_CANDIDATES).all()
+    if category is not None:
+        wanted = canonical_category(category)
+        rows = [
+            row
+            for row in rows
+            if canonical_category((row.ai_analysis or {}).get("category")) == wanted
+        ]
+    return rows
 
 
 def _union_find_clusters(rows: list[Incident], radius_km: float, window_days: int) -> list[list[Incident]]:
@@ -155,6 +172,7 @@ def _cluster_payload(rows: list[Incident], now: datetime) -> dict:
         "first_observed": first_seen.isoformat(),
         "last_observed": last_seen.isoformat(),
         "severity_summary": severity_summary,
+        "latest_status": ordered[-1].status or "verified",
         "persistence_score": score,
         "trend": _trend(ordered),
         "mean_distance_km": round(mean_distance_km, 3),
@@ -168,6 +186,51 @@ def _cluster_payload(rows: list[Incident], now: datetime) -> dict:
     }
 
 
+def _staff_payload(groups: list[list[Incident]], db: Session) -> list[dict]:
+    """Build staff-only metadata without exposing it on the public contract."""
+
+    all_ids = [row.id for group in groups for row in group]
+    note_counts: dict[str, int] = {}
+    if all_ids:
+        note_counts = {
+            str(incident_id): int(count)
+            for incident_id, count in (
+                db.query(IncidentNote.incident_id, func.count(IncidentNote.id))
+                .filter(IncidentNote.incident_id.in_(all_ids))
+                .group_by(IncidentNote.incident_id)
+                .all()
+            )
+        }
+
+    payload = []
+    for group in groups:
+        ordered = sorted(group, key=lambda row: (_utc(row.created_at), str(row.id)))
+        assignments = [
+            {
+                "incident_id": str(row.id),
+                "assigned_to": str(row.assigned_to) if row.assigned_to else None,
+                "status": "assigned" if row.assigned_to else "unassigned",
+            }
+            for row in ordered
+        ]
+        payload.append(
+            {
+                "related_incident_ids": [str(row.id) for row in ordered],
+                "assignment_status": {
+                    "assigned": sum(1 for row in ordered if row.assigned_to),
+                    "unassigned": sum(1 for row in ordered if not row.assigned_to),
+                    "by_incident": assignments,
+                },
+                "evidence_counts": {
+                    "reports": len(ordered),
+                    "photos": sum(1 for row in ordered if row.photo_url),
+                    "notes": sum(note_counts.get(str(row.id), 0) for row in ordered),
+                },
+            }
+        )
+    return payload
+
+
 def detect_hotspots(
     db: Session,
     *,
@@ -176,9 +239,15 @@ def detect_hotspots(
     limit: int = 50,
     center_lat: float | None = None,
     center_lng: float | None = None,
+    category: str | None = None,
+    severity: str | None = None,
+    trend: str | None = None,
+    include_staff_details: bool = False,
 ) -> list[dict]:
     """Return deterministic clusters of verified, high-confidence observations."""
 
+    since = datetime.now(timezone.utc) - timedelta(days=window_days)
+    wanted_category = canonical_category(category) if category is not None else None
     rows = [
         row
         for row in _candidate_rows(
@@ -186,11 +255,39 @@ def detect_hotspots(
             center_lat=center_lat,
             center_lng=center_lng,
             radius_km=radius_km if center_lat is not None and center_lng is not None else None,
+            since=since,
+            category=category,
+            severity=severity,
         )
-        if row.status == "verified" and _confidence(row) >= 0.7
+        if row.status == "verified"
+        and _confidence(row) >= 0.7
+        and _utc(row.created_at) >= since
+        and (
+            wanted_category is None
+            or canonical_category((row.ai_analysis or {}).get("category")) == wanted_category
+        )
+        and (severity is None or row.severity == severity)
     ]
     clusters = _union_find_clusters(rows, max(0.05, min(radius_km, 25)), max(1, min(window_days, 365)))
-    now = max((_utc(row.created_at) for row in rows), default=datetime.now(timezone.utc))
+    now = datetime.now(timezone.utc)
     payload = [_cluster_payload(group, now) for group in clusters]
+    if trend is not None:
+        payload = [item for item in payload if item["trend"] == trend]
     payload.sort(key=lambda item: (-item["persistence_score"], item["category"], item["id"]))
-    return payload[: max(1, min(limit, 100))]
+    payload = payload[: max(1, min(limit, 100))]
+    if include_staff_details and payload:
+        details = _staff_payload(clusters, db)
+        # Match the filtered/sorted payloads back to their source cluster by
+        # the first deterministic incident id, without changing public output.
+        for item in payload:
+            source = next(
+                (
+                    detail
+                    for detail in details
+                    if detail["related_incident_ids"] == item["report_ids"]
+                ),
+                None,
+            )
+            if source:
+                item.update(source)
+    return payload
