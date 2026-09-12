@@ -1,5 +1,5 @@
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import (
     Depends,
@@ -85,6 +85,17 @@ VALID_INCIDENT_STATUSES = TRIAGE_STATUSES | RESOLUTION_STATUSES | {"resolved"}
 TERMINAL_INCIDENT_STATUSES = {"resolved", "community_confirmed", "closed"}
 INCIDENT_QUEUES = {"mine", "unassigned"}
 INCIDENT_SORTS = {"newest", "oldest", "severity", "action"}
+INCIDENT_STATES = {"needs_attention", "resolved"}
+INCIDENT_SLA_FILTERS = {"overdue", "breaching"}
+NEEDS_ATTENTION_STATUSES = {
+    "processing",
+    "needs_review",
+    "verified",
+    "escalated",
+    "awaiting_verification",
+    "needs_follow_up",
+}
+RESOLVED_INCIDENT_STATUSES = {"resolved", "community_confirmed"}
 
 
 # ---------- schemas ----------
@@ -134,6 +145,9 @@ class BulkFiltersIn(BaseModel):
     status: str | None = None
     severity: str | None = None
     queue: str | None = None
+    window_days: int | None = Field(default=None, ge=1, le=365)
+    state: str | None = None
+    sla: str | None = None
 
 
 class ResolutionReviewIn(BaseModel):
@@ -778,8 +792,20 @@ def _clean_incident_scope(
     status: str | None,
     severity: str | None,
     queue: str | None,
+    window_days: int | None,
+    state: str | None,
+    sla: str | None,
     sort: str,
-) -> tuple[str | None, str | None, str | None, str | None, str]:
+) -> tuple[
+    str | None,
+    str | None,
+    str | None,
+    str | None,
+    int | None,
+    str | None,
+    str | None,
+    str,
+]:
     clean_q = (q or "").strip() or None
     if clean_q and len(clean_q) > 100:
         raise HTTPException(422, "q must be 100 characters or fewer")
@@ -789,9 +815,37 @@ def _clean_incident_scope(
         raise HTTPException(422, "invalid incident severity")
     if queue is not None and queue not in INCIDENT_QUEUES:
         raise HTTPException(422, "invalid incident queue")
+    if window_days is not None and not 1 <= window_days <= 365:
+        raise HTTPException(422, "window_days must be between 1 and 365")
+    if state is not None and state not in INCIDENT_STATES:
+        raise HTTPException(422, "invalid incident state")
+    if sla is not None and sla not in INCIDENT_SLA_FILTERS:
+        raise HTTPException(422, "invalid incident SLA filter")
+    if status is not None and state is not None:
+        raise HTTPException(422, "status and state cannot be combined")
+    if state == "resolved" and sla is not None:
+        raise HTTPException(422, "SLA filters cannot target resolved incidents")
     if sort not in INCIDENT_SORTS:
         raise HTTPException(422, "invalid incident sort")
-    return clean_q, status, severity, queue, sort
+    return clean_q, status, severity, queue, window_days, state, sla, sort
+
+
+def _incident_overdue_clause():
+    return or_(
+        and_(Incident.severity == "critical", Incident.created_at <= func.now() - text("interval '1 hour'")),
+        and_(Incident.severity == "high", Incident.created_at <= func.now() - text("interval '4 hours'")),
+        and_(Incident.severity == "medium", Incident.created_at <= func.now() - text("interval '24 hours'")),
+        and_(Incident.severity == "low", Incident.created_at <= func.now() - text("interval '48 hours'")),
+    )
+
+
+def _incident_breaching_clause():
+    return or_(
+        and_(Incident.severity == "critical", Incident.created_at <= func.now() - text("interval '45 minutes'")),
+        and_(Incident.severity == "high", Incident.created_at <= func.now() - text("interval '3 hours'")),
+        and_(Incident.severity == "medium", Incident.created_at <= func.now() - text("interval '18 hours'")),
+        and_(Incident.severity == "low", Incident.created_at <= func.now() - text("interval '36 hours'")),
+    )
 
 
 def _apply_incident_scope(
@@ -801,6 +855,9 @@ def _apply_incident_scope(
     status: str | None,
     severity: str | None,
     queue: str | None,
+    window_days: int | None,
+    state: str | None,
+    sla: str | None,
     staff_id: str,
 ):
     if q:
@@ -812,6 +869,14 @@ def _apply_incident_scope(
         query = query.filter(Incident.status == status)
     if severity:
         query = query.filter(Incident.severity == severity)
+    if window_days is not None:
+        query = query.filter(
+            Incident.created_at >= datetime.utcnow() - timedelta(days=window_days)
+        )
+    if state == "needs_attention":
+        query = query.filter(Incident.status.in_(NEEDS_ATTENTION_STATUSES))
+    elif state == "resolved":
+        query = query.filter(Incident.status.in_(RESOLVED_INCIDENT_STATUSES))
     if queue == "mine":
         query = query.filter(
             Incident.assigned_to == staff_id,
@@ -822,22 +887,17 @@ def _apply_incident_scope(
             Incident.assigned_to.is_(None),
             Incident.status.notin_(TERMINAL_INCIDENT_STATUSES),
         )
+    if sla:
+        query = query.filter(Incident.status.notin_(TERMINAL_INCIDENT_STATUSES))
+        query = query.filter(
+            _incident_overdue_clause() if sla == "overdue" else _incident_breaching_clause()
+        )
     return query
 
 
 def _incident_action_rank():
-    overdue = or_(
-        and_(Incident.severity == "critical", Incident.created_at <= func.now() - text("interval '1 hour'")),
-        and_(Incident.severity == "high", Incident.created_at <= func.now() - text("interval '4 hours'")),
-        and_(Incident.severity == "medium", Incident.created_at <= func.now() - text("interval '24 hours'")),
-        and_(Incident.severity == "low", Incident.created_at <= func.now() - text("interval '48 hours'")),
-    )
-    breaching = or_(
-        and_(Incident.severity == "critical", Incident.created_at <= func.now() - text("interval '45 minutes'")),
-        and_(Incident.severity == "high", Incident.created_at <= func.now() - text("interval '3 hours'")),
-        and_(Incident.severity == "medium", Incident.created_at <= func.now() - text("interval '18 hours'")),
-        and_(Incident.severity == "low", Incident.created_at <= func.now() - text("interval '36 hours'")),
-    )
+    overdue = _incident_overdue_clause()
+    breaching = _incident_breaching_clause()
     return case(
         (Incident.status.in_(TERMINAL_INCIDENT_STATUSES), 3),
         (overdue, 0),
@@ -868,14 +928,24 @@ def admin_list(
     status: str | None = None,
     severity: str | None = None,
     queue: str | None = None,
+    window_days: int | None = Query(None, ge=1, le=365),
+    state: str | None = None,
+    sla: str | None = None,
     sort: str = Query("newest"),
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     staff: Staff = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ):
-    q, status, severity, queue, sort = _clean_incident_scope(
-        q=q, status=status, severity=severity, queue=queue, sort=sort
+    q, status, severity, queue, window_days, state, sla, sort = _clean_incident_scope(
+        q=q,
+        status=status,
+        severity=severity,
+        queue=queue,
+        window_days=window_days,
+        state=state,
+        sla=sla,
+        sort=sort,
     )
     query = _apply_incident_scope(
         db.query(Incident),
@@ -883,6 +953,9 @@ def admin_list(
         status=status,
         severity=severity,
         queue=queue,
+        window_days=window_days,
+        state=state,
+        sla=sla,
         staff_id=str(staff.id),
     )
     total = query.count()
@@ -1209,11 +1282,23 @@ def admin_bulk(
         raise HTTPException(422, "nothing to apply")
     if filtered_scope:
         filters = body.filters
-        filter_q, filter_status, filter_severity, filter_queue, _ = _clean_incident_scope(
+        (
+            filter_q,
+            filter_status,
+            filter_severity,
+            filter_queue,
+            filter_window_days,
+            filter_state,
+            filter_sla,
+            _,
+        ) = _clean_incident_scope(
             q=filters.q,
             status=filters.status,
             severity=filters.severity,
             queue=filters.queue,
+            window_days=filters.window_days,
+            state=filters.state,
+            sla=filters.sla,
             sort="newest",
         )
         target_query = _apply_incident_scope(
@@ -1222,6 +1307,9 @@ def admin_bulk(
             status=filter_status,
             severity=filter_severity,
             queue=filter_queue,
+            window_days=filter_window_days,
+            state=filter_state,
+            sla=filter_sla,
             staff_id=str(staff.id),
         )
         explicit_ids = [str(row.id) for row in target_query.all()]
@@ -1584,34 +1672,46 @@ def admin_photo(
 
 
 @app.get("/admin/analytics/summary")
-def analytics(staff: Staff = Depends(get_current_staff), db: Session = Depends(get_db)):
+def analytics(
+    window_days: int = Query(30, ge=1, le=365),
+    staff: Staff = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+):
+    cutoff = datetime.utcnow() - timedelta(days=window_days)
+    scope = db.query(Incident).filter(Incident.created_at >= cutoff)
     by_status: dict = {}
-    for k, v in db.query(Incident.status, func.count()).group_by(Incident.status).all():
+    for k, v in (
+        scope.with_entities(Incident.status, func.count())
+        .group_by(Incident.status)
+        .all()
+    ):
         by_status[str(k)] = int(v)
     by_sev: dict = {}
     for k, v in (
-        db.query(Incident.severity, func.count()).group_by(Incident.severity).all()
+        scope.with_entities(Incident.severity, func.count())
+        .group_by(Incident.severity)
+        .all()
     ):
         by_sev[str(k)] = int(v)
     by_cat: dict[str, int] = {}
-    for (a,) in db.query(Incident.ai_analysis).all():
+    for (a,) in scope.with_entities(Incident.ai_analysis).all():
         raw_category = (a or {}).get("category") if isinstance(a, dict) else None
         if not raw_category:
             continue
         c = canonical_category(raw_category)
         by_cat[c] = by_cat.get(c, 0) + 1
     by_day_raw = (
-        db.query(func.date(Incident.created_at), func.count())
+        scope.with_entities(func.date(Incident.created_at), func.count())
         .group_by(func.date(Incident.created_at))
         .all()
     )
     by_day_status_raw = (
-        db.query(func.date(Incident.created_at), Incident.status, func.count())
+        scope.with_entities(func.date(Incident.created_at), Incident.status, func.count())
         .group_by(func.date(Incident.created_at), Incident.status)
         .all()
     )
     by_day_sev_raw = (
-        db.query(func.date(Incident.created_at), Incident.severity, func.count())
+        scope.with_entities(func.date(Incident.created_at), Incident.severity, func.count())
         .group_by(func.date(Incident.created_at), Incident.severity)
         .all()
     )
@@ -1649,13 +1749,23 @@ def analytics(staff: Staff = Depends(get_current_staff), db: Session = Depends(g
         )
         if str(s) == "critical":
             entry["critical"] = int(c)
+    action_scope = scope.filter(Incident.status.notin_(TERMINAL_INCIDENT_STATUSES))
+    action_counts = {
+        "overdue": action_scope.filter(_incident_overdue_clause()).count(),
+        "breaching": action_scope.filter(_incident_breaching_clause()).count(),
+        "needs_review": by_status.get("needs_review", 0),
+        "escalated": by_status.get("escalated", 0),
+        "needs_follow_up": by_status.get("needs_follow_up", 0),
+    }
     total = sum(by_status.values())
     return {
+        "window_days": window_days,
         "total": total,
         "by_category": [{"name": k, "count": v} for k, v in sorted(by_cat.items())],
         "by_status": [{"status": k, "count": v} for k, v in sorted(by_status.items())],
         "by_severity": [{"severity": k, "count": v} for k, v in sorted(by_sev.items())],
         "by_day": [per_day[k] for k in sorted(per_day)],
+        "action_counts": action_counts,
     }
 
 
