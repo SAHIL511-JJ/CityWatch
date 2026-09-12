@@ -96,5 +96,6 @@ test("staff can review a pending community follow-up", async ({ page }) => {
   await page.getByRole("button", { name: "Close fullscreen photo" }).click();
   await page.getByPlaceholder("Review note (required when requesting more work)").fill("Crew needs to inspect the outlet.");
   await page.getByRole("button", { name: "Request more work" }).click();
+  await page.getByRole("button", { name: "Confirm review" }).click();
   await expect.poll(() => reviewPayload).toEqual({ outcome: "needs_follow_up", review_note: "Crew needs to inspect the outlet." });
 });

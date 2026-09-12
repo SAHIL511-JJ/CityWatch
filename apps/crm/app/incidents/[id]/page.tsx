@@ -260,6 +260,10 @@ export default function IncidentDetailPage() {
   const [authorityPhoto, setAuthorityPhoto] = useState<File | null>(null);
   const [hotspotSnapshotId, setHotspotSnapshotId] = useState("");
   const [reviewNotes, setReviewNotes] = useState<Record<string, string>>({});
+  const [reviewConfirm, setReviewConfirm] = useState<{
+    evidenceId: string;
+    outcome: "confirmed" | "needs_follow_up";
+  } | null>(null);
 
   // reset local edits when switching incidents
   useEffect(() => {
@@ -276,6 +280,7 @@ export default function IncidentDetailPage() {
     setAuthorityPhoto(null);
     setHotspotSnapshotId("");
     setReviewNotes({});
+    setReviewConfirm(null);
   }, [id]);
 
   // Esc closes the lightbox
@@ -360,6 +365,7 @@ export default function IncidentDetailPage() {
       }),
     onSuccess: () => {
       refresh();
+      setReviewConfirm(null);
       setToast({ msg: "Community follow-up reviewed", undo: () => setToast(null) });
     },
   });
@@ -459,6 +465,45 @@ export default function IncidentDetailPage() {
     (item) => item.evidence_type === "community_follow_up" && item.review_outcome === "pending"
   );
   const canSubmitAuthority = ["verified", "escalated", "resolved", "needs_follow_up"].includes(data.status);
+  const resolutionStage = data.status === "community_confirmed"
+    ? {
+        title: "Resolution confirmed by the community",
+        detail: "The verification cycle is complete. Keep the evidence and audit trail available for reference.",
+        owner: "Complete",
+        current: 3,
+        tone: "border-emerald-200 bg-emerald-50",
+      }
+    : data.status === "awaiting_verification" && pendingFollowUps.length > 0
+      ? {
+          title: "Community follow-up ready for review",
+          detail: "A community member has submitted current evidence. Review the note and photo, then choose the outcome.",
+          owner: "Staff",
+          current: 3,
+          tone: "border-amber-200 bg-amber-50",
+        }
+      : data.status === "awaiting_verification"
+        ? {
+            title: "Waiting for community follow-up",
+            detail: "Authority evidence is recorded. A community member must provide the current observation before staff can confirm it.",
+            owner: "Community",
+            current: 2,
+            tone: "border-amber-200 bg-amber-50",
+          }
+        : canSubmitAuthority
+          ? {
+              title: "Authority action required",
+              detail: "Record the action taken and attach an after-photo to start the verification cycle.",
+              owner: data.assigned_to ? "Assigned staff" : "Unassigned",
+              current: 1,
+              tone: "border-[#cbdcc6] bg-[#f2f6f0]",
+            }
+          : {
+              title: "Complete triage before resolution",
+              detail: "Use the triage controls first. Resolution evidence becomes available once this report is verified or escalated.",
+              owner: "Staff",
+              current: 0,
+              tone: "border-zinc-200 bg-zinc-50",
+            };
   const photoSrc = data.photo_url
     ? `${getApiBase()}/admin/incidents/${id}/photo?token=${getToken() ?? ""}`
     : null;
@@ -541,6 +586,36 @@ export default function IncidentDetailPage() {
           )}
         </p>
       </div>
+
+      <Card className={`border ${resolutionStage.tone}`} aria-live="polite">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-zinc-500">Resolution path</p>
+            <h2 className="mt-1 text-lg font-semibold tracking-tight text-zinc-900">{resolutionStage.title}</h2>
+            <p className="mt-1 max-w-2xl text-sm leading-relaxed text-zinc-600">{resolutionStage.detail}</p>
+          </div>
+          <span className="rounded-md bg-white/80 px-2.5 py-1 text-xs font-medium text-zinc-600 ring-1 ring-inset ring-zinc-200">Next owner: {resolutionStage.owner}</span>
+        </div>
+        <ol aria-label="Resolution stages" className="mt-4 grid gap-2 sm:grid-cols-3">
+          {[
+            [1, "Authority action", "After-photo"],
+            [2, "Community follow-up", "Current observation"],
+            [3, "Staff confirmation", "Confirm or request work"],
+          ].map(([number, label, hint]) => {
+            const complete = resolutionStage.current > Number(number) || (number === 3 && data.status === "community_confirmed");
+            const current = resolutionStage.current === Number(number);
+            return (
+              <li key={number} className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-xs ${current ? "bg-white text-zinc-900 ring-1 ring-inset ring-zinc-300" : "text-zinc-500"}`}>
+                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${complete ? "bg-emerald-700 text-white" : current ? "bg-[#14231a] text-white" : "bg-zinc-200 text-zinc-500"}`}>{complete ? "✓" : number}</span>
+                <span><strong className="block font-semibold">{label}</strong><span className="text-[11px] text-zinc-500">{hint}</span></span>
+              </li>
+            );
+          })}
+        </ol>
+        {data.status === "awaiting_verification" && pendingFollowUps.length > 0 && (
+          <button type="button" onClick={() => document.getElementById("pending-review")?.scrollIntoView({ behavior: "smooth", block: "center" })} className="mt-3 rounded-md bg-[#14231a] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[#2a4a33] active:translate-y-px focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Review follow-up</button>
+        )}
+      </Card>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-5">
         {/* Left: evidence */}
@@ -640,7 +715,7 @@ export default function IncidentDetailPage() {
               <p className="text-sm text-zinc-500">Resolve the incident through triage first; authority evidence is available from a verified or escalated report.</p>
             )}
             {pendingFollowUps.length > 0 && (
-              <div className="mt-4 space-y-3 border-t border-zinc-200 pt-4">
+              <div id="pending-review" className="mt-4 space-y-3 border-t border-zinc-200 pt-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Pending community review</p>
                 {pendingFollowUps.map((item) => (
                   <div key={item.id} className="rounded-lg border border-amber-200 bg-amber-50 p-3">
@@ -670,19 +745,28 @@ export default function IncidentDetailPage() {
                     <div className="mt-2 flex flex-wrap gap-2">
                       <button
                         disabled={reviewEvidence.isPending}
-                        onClick={() => reviewEvidence.mutate({ evidenceId: item.id, outcome: "confirmed" })}
-                        className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600 disabled:opacity-50"
+                        onClick={() => setReviewConfirm({ evidenceId: item.id, outcome: "confirmed" })}
+                        className="rounded-md bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-600 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#2a4a33]"
                       >
                         Confirm resolution
                       </button>
                       <button
                         disabled={reviewEvidence.isPending || !(reviewNotes[item.id] ?? "").trim()}
-                        onClick={() => reviewEvidence.mutate({ evidenceId: item.id, outcome: "needs_follow_up" })}
-                        className="rounded-md bg-white px-3 py-1.5 text-xs font-medium text-rose-700 ring-1 ring-inset ring-rose-300 hover:bg-rose-50 disabled:opacity-50"
+                        onClick={() => setReviewConfirm({ evidenceId: item.id, outcome: "needs_follow_up" })}
+                        className="rounded-md bg-white px-3 py-1.5 text-xs font-medium text-rose-700 ring-1 ring-inset ring-rose-300 hover:bg-rose-50 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#2a4a33]"
                       >
                         Request more work
                       </button>
                     </div>
+                    {reviewConfirm?.evidenceId === item.id && (
+                      <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-zinc-200 bg-white p-2.5" role="alertdialog" aria-label="Confirm community follow-up review">
+                        <p className="mr-auto text-xs text-zinc-700">
+                          Confirm {reviewConfirm.outcome === "confirmed" ? "the resolution" : "a request for more work"}?
+                        </p>
+                        <button type="button" onClick={() => setReviewConfirm(null)} disabled={reviewEvidence.isPending} className="rounded-md px-2.5 py-1.5 text-xs font-medium text-zinc-600 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-50 focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Cancel</button>
+                        <button type="button" onClick={() => reviewEvidence.mutate({ evidenceId: item.id, outcome: reviewConfirm.outcome })} disabled={reviewEvidence.isPending} className="rounded-md bg-[#14231a] px-2.5 py-1.5 text-xs font-medium text-white hover:bg-[#2a4a33] disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">{reviewEvidence.isPending ? "Saving…" : "Confirm review"}</button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
