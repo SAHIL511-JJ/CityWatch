@@ -200,7 +200,6 @@ function FilterBar({
             <select value={filters.status} onChange={(event) => onChange({ status: event.target.value })} className="mt-1 block w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm font-normal text-zinc-800 outline-none transition focus:border-[#2a4a33] focus:ring-2 focus:ring-[#dce8dc]">
               <option value="all">All operational</option>
               <option value="verified">Verified</option>
-              <option value="escalated">Escalated</option>
               <option value="resolved">Resolved</option>
               <option value="awaiting_verification">Awaiting verification</option>
               <option value="community_confirmed">Community confirmed</option>

@@ -11,7 +11,6 @@ TRIAGE_STATUSES = frozenset(
         "needs_review",
         "verified",
         "rejected",
-        "escalated",
         "closed",
     }
 )
@@ -21,12 +20,11 @@ RESOLUTION_STATUSES = frozenset(
 ALL_INCIDENT_STATUSES = TRIAGE_STATUSES | RESOLUTION_STATUSES | {"resolved"}
 
 AUTHORITY_START_STATUSES = frozenset(
-    {"verified", "escalated", "resolved", "needs_follow_up"}
+    {"verified", "resolved", "needs_follow_up"}
 )
 OPERATIONAL_STATUSES = frozenset(
     {
         "verified",
-        "escalated",
         "resolved",
         "awaiting_verification",
         "community_confirmed",
@@ -38,18 +36,17 @@ OPERATIONAL_STATUSES = frozenset(
 # These are the only normal staff status actions. ``closed`` is appended as a
 # separate emergency action for every non-closed status below.
 MANUAL_STATUS_TRANSITIONS: Mapping[str, frozenset[str]] = {
-    "processing": frozenset({"verified", "rejected", "escalated"}),
-    "needs_review": frozenset({"verified", "rejected", "escalated"}),
-    "verified": frozenset({"escalated"}),
+    "processing": frozenset({"verified", "rejected"}),
+    "needs_review": frozenset({"verified", "rejected"}),
+    "verified": frozenset(),
     "rejected": frozenset(),
-    "escalated": frozenset({"verified"}),
     "resolved": frozenset(),
     "awaiting_verification": frozenset(),
     "community_confirmed": frozenset(),
     "needs_follow_up": frozenset(),
     "closed": frozenset(),
 }
-MANUAL_ACTION_ORDER = ("verified", "rejected", "escalated", "closed")
+MANUAL_ACTION_ORDER = ("verified", "rejected", "closed")
 AI_SOURCE_STATUSES = frozenset({"processing", "needs_review"})
 AI_TARGET_STATUSES = frozenset({"verified", "rejected", "needs_review"})
 

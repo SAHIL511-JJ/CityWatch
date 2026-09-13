@@ -64,7 +64,6 @@ export function readInsightsFilters(params: URLSearchParams): InsightsFilters {
     status: [
       "all",
       "verified",
-      "escalated",
       "resolved",
       "awaiting_verification",
       "community_confirmed",

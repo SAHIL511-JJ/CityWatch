@@ -143,7 +143,7 @@ Details:
 
 - Keep the image thumbnail only as secondary context. It must retain the existing 1px-placeholder fallback behavior.
 - Render the description with `line-clamp-2`; do not repeat the full text in every list row. `Open incident` is the explicit details affordance.
-- Keep critical, overdue, escalated, and needs-review states distinct, but limit emphasis to one action-state chip plus existing status/severity markers. Do not make every metadata value a bright badge.
+- Keep critical, overdue, and needs-review states distinct, but limit emphasis to one action-state chip plus existing status/severity markers. Do not make every metadata value a bright badge.
 - Keep duplicate information available as a compact linked indicator, not as a competing primary label.
 - Use CSS grid/flex wrapping so narrow widths stack identity, action state, owner, and age vertically without horizontal scrolling. Do not use a desktop table that forces sideways scrolling on mobile.
 - Preserve keyboard order: selection checkbox, incident link, then any duplicate/details link. Each interactive target needs a visible focus ring.
@@ -196,7 +196,7 @@ Rules:
    - `25 incidents selected on this page`, or
    - `All 45 matching incidents selected`.
 5. Before every bulk mutation, show an inline confirmation panel in the toolbar with the action name, affected count, scope, and Cancel/Confirm buttons. Cancel changes nothing and preserves selection.
-6. Keep the supported bulk actions narrowly aligned with the existing endpoint: approve, reject, escalate, assign. Do not add new workflow statuses or new bulk action types.
+6. Keep the supported bulk actions narrowly aligned with the existing endpoint: approve, reject, assign. Do not add new workflow statuses or new bulk action types.
 7. Remove the current best-effort Undo from bulk toasts. It is unreliable for a server-side filtered selection and can create misleading extra status history. Replace it with a non-actionable success/error message containing the returned affected count.
 8. On successful confirmation, invalidate incidents, duplicates, staff counts, dashboard data, and sidebar data. Keep URL filters, sort, and page; clear the completed selection. If the current page is now invalid, use the corrected page returned by the list response.
 9. On error, retain the selection and show the server error in the toolbar so the operator can retry or cancel.
@@ -215,7 +215,7 @@ Put one resolution state banner immediately after the incident header and before
 
 | Incident state | Banner and next owner | Primary action |
 | --- | --- | --- |
-| `verified`, `escalated`, legacy `resolved`, `needs_follow_up` | `Authority action required` / assigned staff or `Unassigned` | `Record authority evidence` |
+| `verified`, legacy `resolved`, `needs_follow_up` | `Authority action required` / assigned staff or `Unassigned` | `Record authority evidence` |
 | `awaiting_verification`, no pending follow-up | `Waiting for community follow-up` / community | No staff action; explain the waiting state. |
 | `awaiting_verification`, pending follow-up exists | `Community follow-up ready for review` / staff | `Review follow-up` scrolls/focuses the review card. |
 | `community_confirmed` | `Resolution confirmed by community` / complete | No action. |

@@ -91,7 +91,6 @@ NEEDS_ATTENTION_STATUSES = {
     "processing",
     "needs_review",
     "verified",
-    "escalated",
     "awaiting_verification",
     "needs_follow_up",
 }
@@ -1286,7 +1285,6 @@ def admin_split(
 BULK_STATUS = {
     "verified",
     "rejected",
-    "escalated",
 }
 BULK_SEVERITY = {"low", "medium", "high", "critical"}
 
@@ -1808,7 +1806,6 @@ def analytics(
         "processing",
         "needs_review",
         "verified",
-        "escalated",
         "awaiting_verification",
         "needs_follow_up",
     }
@@ -1843,7 +1840,6 @@ def analytics(
         "overdue": action_scope.filter(_incident_overdue_clause()).count(),
         "breaching": action_scope.filter(_incident_breaching_clause()).count(),
         "needs_review": by_status.get("needs_review", 0),
-        "escalated": by_status.get("escalated", 0),
         "needs_follow_up": by_status.get("needs_follow_up", 0),
     }
     total = sum(by_status.values())

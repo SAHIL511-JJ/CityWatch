@@ -16,7 +16,7 @@ PLAYBOOKS: dict[str, dict[str, object]] = {
             "Pump or redirect standing water where it threatens access, homes, or public safety.",
             "Inspect nearby drains and outfalls for capacity, damage, or repeat blockage.",
         ],
-        "escalate_when": [
+        "contact_authority_when": [
             "Critical reports indicate an immediate safety or access risk.",
             "The signal is rising, recurring after rainfall, or expanding beyond the current area.",
         ],
@@ -30,7 +30,7 @@ PLAYBOOKS: dict[str, dict[str, object]] = {
             "Clear nearby inlets and route standing water to a safe discharge point.",
             "Check whether the pattern is caused by blocked drainage, low capacity, or damaged infrastructure.",
         ],
-        "escalate_when": [
+        "contact_authority_when": [
             "Critical reports indicate danger to people, traffic, or property.",
             "Waterlogging persists after clearing or repeatedly returns in the same location.",
         ],
@@ -44,7 +44,7 @@ PLAYBOOKS: dict[str, dict[str, object]] = {
             "Inspect the inlet, grate, and downstream outfall for a second blockage or damage.",
             "Schedule desilting or maintenance if the same drain is repeatedly affected.",
         ],
-        "escalate_when": [
+        "contact_authority_when": [
             "The blockage is linked to flooding, sewage, or an unsafe road condition.",
             "The same location produces repeated reports after cleaning.",
         ],
@@ -58,7 +58,7 @@ PLAYBOOKS: dict[str, dict[str, object]] = {
             "Collect and segregate the waste using the appropriate handling procedure.",
             "Identify the likely source and arrange a recurring collection or site-maintenance response.",
         ],
-        "escalate_when": [
+        "contact_authority_when": [
             "The accumulation is growing, obstructing access, or creating a health or fire risk.",
             "Reports show repeated dumping after prior collection.",
         ],
@@ -72,7 +72,7 @@ PLAYBOOKS: dict[str, dict[str, object]] = {
             "Inspect the line, manhole, or discharge point to identify the overflow source.",
             "Contain, disinfect, and repair the failed section using the local sanitation procedure.",
         ],
-        "escalate_when": [
+        "contact_authority_when": [
             "Any active overflow creates a public-health exposure or affects homes, schools, or roads.",
             "Critical or repeated reports indicate the underlying utility failure is unresolved.",
         ],
@@ -86,7 +86,7 @@ PLAYBOOKS: dict[str, dict[str, object]] = {
             "Clear nearby drains and waterways if the material is blocking flow or moving downstream.",
             "Identify repeat sources and place collection or prevention measures at the hotspot.",
         ],
-        "escalate_when": [
+        "contact_authority_when": [
             "Plastic is entering a drain, waterway, or public access route.",
             "The hotspot is expanding or returning after collection.",
         ],
@@ -100,7 +100,7 @@ PLAYBOOKS: dict[str, dict[str, object]] = {
             "Record the location, timing, visible indicators, and affected area for inspection.",
             "Collect measurements or samples when the responsible team and local procedure support it.",
         ],
-        "escalate_when": [
+        "contact_authority_when": [
             "Reports are rising or indicate high or critical exposure risk.",
             "The suspected source is active, spreading, or affecting a sensitive population.",
         ],
@@ -114,7 +114,7 @@ PLAYBOOKS: dict[str, dict[str, object]] = {
             "Inspect the structure or road section to determine the immediate safety risk.",
             "Schedule the appropriate repair and keep the location monitored until it is complete.",
         ],
-        "escalate_when": [
+        "contact_authority_when": [
             "The damage creates immediate danger, blocks access, or is worsening.",
             "Repeated reports indicate the temporary measure did not hold.",
         ],
@@ -128,7 +128,7 @@ PLAYBOOKS: dict[str, dict[str, object]] = {
             "Apply the safest temporary control available while the responsible team is identified.",
             "Route the issue to the relevant department after classification.",
         ],
-        "escalate_when": [
+        "contact_authority_when": [
             "The condition is high or critical severity, unclear, or creating immediate danger.",
             "Reports continue after the temporary control is applied.",
         ],
@@ -171,6 +171,6 @@ def build_action_plan(signal: Mapping[str, object]) -> dict[str, object]:
         "objective": str(template["objective"]),
         "authority": str(template["authority"]),
         "immediate_steps": list(template["immediate_steps"]),
-        "escalate_when": list(template["escalate_when"]),
+        "contact_authority_when": list(template["contact_authority_when"]),
         "verify": str(template["verify"]),
     }

@@ -3,7 +3,6 @@ export type IncidentStatus =
   | "needs_review"
   | "verified"
   | "rejected"
-  | "escalated"
   | "resolved"
   | "awaiting_verification"
   | "community_confirmed"
@@ -19,7 +18,7 @@ export interface InsightActionPlan {
   objective: string;
   authority: string;
   immediate_steps: string[];
-  escalate_when: string[];
+  contact_authority_when: string[];
   verify: string;
 }
 
@@ -180,7 +179,6 @@ export interface AnalyticsSummary {
     overdue: number;
     breaching: number;
     needs_review: number;
-    escalated: number;
     needs_follow_up: number;
   };
   total?: number;

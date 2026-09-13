@@ -48,7 +48,7 @@ This is a **plan-only** artifact. It must be followed without adding a browser-t
 - A lightweight shared CRM page-header and primary page-feedback pattern, documented in the component layer and adopted by the five top-level modules: Dashboard, Incidents, Users, Staff, and Insights.
 - A persistent, accessible Review queue link in the global authenticated shell, with a visible compact label at narrow widths.
 - A 30-calendar-day dashboard scope used consistently for dashboard KPIs, action counts, charts, latest activity, recurring signals, labels, and KPI destinations.
-- Server-authoritative dashboard action counts: overdue, breaching, needs review, escalated, and needs follow-up.
+- Server-authoritative dashboard action counts: overdue, breaching, needs review, and needs follow-up.
 - Optional incident-list query parameters needed to represent an exact dashboard destination: `window_days`, `state`, and `sla`.
 - A dominant dashboard Needs action section with direct queue links, followed by clickable, clearly defined KPI cards.
 - A compact recurring-signal list on the dashboard, with no default explanation prose and one evidence-detail action per row.
@@ -75,7 +75,7 @@ This is a **plan-only** artifact. It must be followed without adding a browser-t
 ### Working assumptions
 
 - **Dashboard scope is fixed at the last 30 calendar days.** It matches the current hotspot default and keeps the first implementation small. The dashboard must visibly say `Last 30 calendar days`; do not suggest the result is all-time or an arbitrary set of reported days.
-- **`Needs attention` means exactly these statuses:** `processing`, `needs_review`, `verified`, `escalated`, `awaiting_verification`, and `needs_follow_up`. `rejected`, `closed`, `resolved`, and `community_confirmed` are excluded. This retains the current dashboard calculation but makes it explicit and reusable.
+- **`Needs attention` means exactly these statuses:** `processing`, `needs_review`, `verified`, `awaiting_verification`, and `needs_follow_up`. `rejected`, `closed`, `resolved`, and `community_confirmed` are excluded. This retains the current dashboard calculation but makes it explicit and reusable.
 - **`Resolved` means exactly `resolved` plus `community_confirmed`.** It deliberately does not count rejected or closed records.
 - Dashboard KPI destinations must represent the same query set as their metric. That requires a small extension to the existing incident query instead of client-side filtering.
 - The global Review queue link should target the actionable dashboard scope: `/incidents?state=needs_attention&sort=action&window_days=30`.
@@ -97,7 +97,7 @@ None. The existing data and API ownership are sufficient for this implementation
 ### KAN-42 — action-first command overview
 
 - The first actionable dashboard region after the page heading is a visually dominant Needs action panel, before the KPIs and analytics.
-- It shows authoritative counts for overdue, needs review, escalated, and optionally breaching/follow-up work only when nonzero; each card/link has a useful empty/zero state and a direct scoped incident destination.
+- It shows authoritative counts for overdue, needs review, and optionally breaching/follow-up work only when nonzero; each card/link has a useful empty/zero state and a direct scoped incident destination.
 - A Review queue action remains visible on desktop and narrow mobile through the global shell header; the dashboard panel also contains the relevant direct links.
 - Reporting trend, status breakdown, category/severity context, and latest activity are visually secondary below the action-first area. They remain accessible; do not delete analytics.
 - Dashboard loading, summary failure, no-action, and no-activity states are deliberate and do not leave blank sections.
@@ -107,11 +107,11 @@ None. The existing data and API ownership are sufficient for this implementation
 - All four KPI cards use the same `Last 30 calendar days` scope and render a short visible definition or accessible tooltip.
 - Definitions match the backend query exactly:
   - Total incidents: every incident created in the 30-day scope.
-  - Needs attention: the six explicit status values listed in the assumptions.
+  - Needs attention: the five explicit status values listed in the assumptions.
   - Resolved: `resolved` or `community_confirmed` in the scope.
   - Critical severity: incidents with `severity=critical` in the scope.
 - Activating every KPI takes the user to `/incidents` with a shareable URL whose returned `total` equals the displayed KPI count.
-- The current ambiguity between the Needs attention card and overdue alert is removed: overdue is a subset/escalation signal in Needs action, not a competing definition of Needs attention.
+- The current ambiguity between the Needs attention card and overdue alert is removed: overdue is a high-priority subset of Needs action, not a competing definition of Needs attention.
 
 ### KAN-44 — recurring-signal scanning
 
@@ -171,7 +171,7 @@ Retain the existing `q`, `status`, `severity`, `queue`, `sort`, and `page` param
 
 **Edge cases:** clear all must remove the read-only dashboard scope as well as normal filters; a copied KPI URL must survive refresh; an empty filtered list must show the active `Last 30 days`, state, and SLA chips.
 
-**Verification:** Type-check a small table of URL inputs/outputs manually or in a focused TypeScript unit helper if the repository adds a unit-test runner. At minimum, verify the generated Total, Needs attention, Resolved, Critical, Review, Escalated, and Overdue URLs are deterministic strings.
+**Verification:** Type-check a small table of URL inputs/outputs manually or in a focused TypeScript unit helper if the repository adds a unit-test runner. At minimum, verify the generated Total, Needs attention, Resolved, Critical, Review, and Overdue URLs are deterministic strings.
 
 ### 2. Extend the FastAPI incident query and filtered-bulk scope
 
@@ -218,7 +218,6 @@ Add these response fields without removing existing fields:
     "overdue": 0,
     "breaching": 0,
     "needs_review": 0,
-    "escalated": 0,
     "needs_follow_up": 0
   }
 }
@@ -230,7 +229,7 @@ Use the same defined status sets and SLA predicates from step 2. Do not derive a
 
 - `total`, `by_status`, `by_severity`, `by_category`, `by_day`, and `action_counts` all describe the same rolling `window_days` scope.
 - `by_day` remains sorted ascending and sparse only when a day has no report; the dashboard text must say calendar days, not reported days.
-- `action_counts.overdue` and `.breaching` are non-terminal only. `needs_review`, `escalated`, and `needs_follow_up` are exact status counts in the same time scope.
+- `action_counts.overdue` and `.breaching` are non-terminal only. `needs_review` and `needs_follow_up` are exact status counts in the same time scope.
 
 **Edge cases:** an empty scope returns zeros and empty arrays, not `null`; an invalid window gets 422; a day with zero reports does not cause chart math or sparkline failures.
 
@@ -266,7 +265,6 @@ Use the same defined status sets and SLA predicates from step 2. Do not derive a
 3. Immediately after `PageHeader`, render a `Needs action` region with a strong but existing-brand green/cream surface. It must show:
    - Overdue count -> `/incidents?window_days=30&state=needs_attention&sla=overdue&sort=action`.
    - Needs review count -> `/incidents?window_days=30&status=needs_review&sort=action`.
-   - Escalated count -> `/incidents?window_days=30&status=escalated&sort=action`.
    - Show breaching/follow-up as compact supporting counts only when nonzero; their links use the same scope contract.
 4. If every count is zero, replace urgency language with a calm `No incident needs immediate action` state and keep the global Review link available.
 5. Keep the KPI row below this panel. Move chart/status/category/latest-activity material below the action and signal sections, or place it inside a clearly labeled closed-by-default `Operational context` disclosure. Do not remove data.
@@ -337,7 +335,7 @@ On narrow screens, each row must turn into a labeled two-column metadata block b
 Test at minimum:
 
 - summary defaults to/accepts a 30-day window and excludes older records from every aggregate;
-- summary action counts distinguish overdue, breaching, needs-review, escalated, and terminal records;
+- summary action counts distinguish overdue, breaching, needs-review, follow-up, and terminal records;
 - each `state` scope returns exactly its documented statuses;
 - `window_days`, `state`, and `sla` apply before list count/pagination;
 - invalid state/SLA values and incompatible `status + state` / `resolved + sla` combinations return 422;
@@ -393,7 +391,6 @@ Authenticate as a real test staff account and make authenticated requests agains
 3. Check action destinations:
    - `?window_days=30&state=needs_attention&sla=overdue&sort=action`
    - `?window_days=30&status=needs_review&sort=action`
-   - `?window_days=30&status=escalated&sort=action`
 4. Confirm invalid values return 422 and missing optional values retain existing list behavior.
 5. If filtered bulk is exercised, use a dedicated safe test scope and confirm server `matched` equals the list scope; do not bulk-edit live citizen reports merely to verify this plan.
 
@@ -403,7 +400,7 @@ Use the documented `npx -y @playwright/cli@latest` headed workflow against the a
 
 1. Log in as staff and open the dashboard at 1280px width. Confirm one visible body heading, `Last 30 calendar days`, the Needs action region above KPI cards, and the persistent Review queue control.
 2. Record each KPI value, open it, and confirm the URL chips and result summary describe the same scope. Use browser requests or API responses to verify matching totals.
-3. Open each Needs action CTA. Confirm overdue, review, and escalation destinations show the intended filter chips and `sort=action` where specified.
+3. Open each Needs action CTA. Confirm overdue, review, and follow-up destinations show the intended filter chips and `sort=action` where specified.
 4. Return to dashboard and verify the recurring-signal list has all six fields, no default explanation text, stated sort rule, and working evidence links.
 5. Open the supporting context disclosure/section and ensure charts/latest activity are still reachable without competing with the primary action area.
 6. Repeat dashboard, incident-list target, and Review queue checks at 768px and 390px. Inspect `document.documentElement.scrollWidth` against `clientWidth`; they must be equal. Confirm no clipped CTA, inaccessible sidebar control, or overlapping header elements.

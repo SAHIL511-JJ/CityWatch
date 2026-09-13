@@ -35,7 +35,7 @@ class InsightsFilterTests(unittest.TestCase):
         self.assertEqual(empty["summary"]["total"], 0)
 
     def test_status_is_applied_in_database_query_and_preserves_confidence_gate(self):
-        for status in ("verified", "escalated", "resolved", "closed", "all"):
+        for status in ("verified", "resolved", "closed", "all"):
             with self.subTest(status=status):
                 db = MagicMock()
                 query = db.query.return_value
@@ -54,7 +54,7 @@ class InsightsFilterTests(unittest.TestCase):
                                for call in query.filter.call_args_list for expression in call.args)
                 if status == "all":
                     self.assertIn(
-                        "status IN ('awaiting_verification', 'closed', 'community_confirmed', 'escalated', 'needs_follow_up', 'resolved', 'verified')",
+                        "status IN ('awaiting_verification', 'closed', 'community_confirmed', 'needs_follow_up', 'resolved', 'verified')",
                         sql,
                     )
                 else:

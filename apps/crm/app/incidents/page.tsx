@@ -23,7 +23,6 @@ const STATUSES = [
   "needs_review",
   "verified",
   "rejected",
-  "escalated",
   "resolved",
   "awaiting_verification",
   "community_confirmed",
@@ -35,7 +34,6 @@ const STATUS_LABELS: Record<string, string> = {
   needs_review: "Needs review",
   verified: "Verified",
   rejected: "Rejected",
-  escalated: "Escalated",
   resolved: "Resolved",
   awaiting_verification: "Awaiting verification",
   community_confirmed: "Community confirmed",
@@ -229,7 +227,7 @@ function IncidentsInner() {
   const selectedIds = rows.filter((row) => selected[row.id]).map((row) => row.id);
   const selectedRows = rows.filter((row) => selected[row.id]);
   const commonBulkStatusActions = selectionMode === "page"
-    ? (["verified", "rejected", "escalated"] as const).filter((status) =>
+    ? (["verified", "rejected"] as const).filter((status) =>
         selectedRows.every((row) => row.allowed_statuses?.includes(status)),
       )
     : [];
@@ -386,7 +384,7 @@ function IncidentsInner() {
           <div className="flex flex-wrap items-center gap-2">
             <strong className="mr-2 text-sm">{selectionText}</strong>
             {commonBulkStatusActions.map((value) => {
-              const label = value === "verified" ? "Approve" : value === "rejected" ? "Reject" : "Escalate";
+              const label = value === "verified" ? "Approve" : "Reject";
               return <button key={value} type="button" disabled={bulk.isPending} onClick={() => setPendingBulk({ kind: "status", value, label })} className="inline-flex items-center justify-center rounded-md bg-[#14231a] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[#2a4a33] active:translate-y-px disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">{label}</button>;
             })}
             {selectionMode === "filtered" ? <p className="text-xs text-zinc-600">Select compatible incidents on this page to change status in bulk. Select-all matching is available for assignment only.</p> : commonBulkStatusActions.length === 0 && <p className="text-xs text-zinc-600">No shared status action is available for every selected incident.</p>}

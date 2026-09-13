@@ -29,7 +29,6 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
   needs_review: { label: "Needs review", color: "#d97706" },
   processing: { label: "Processing", color: "#ca8a04" },
   verified: { label: "Verified", color: "#2563eb" },
-  escalated: { label: "Escalated", color: "#7c3aed" },
   resolved: { label: "Resolved", color: "#15803d" },
   awaiting_verification: { label: "Awaiting verification", color: "#b45309" },
   community_confirmed: { label: "Community confirmed", color: "#047857" },
@@ -126,12 +125,11 @@ const EMPTY_ACTION_COUNTS: ActionCounts = {
   overdue: 0,
   breaching: 0,
   needs_review: 0,
-  escalated: 0,
   needs_follow_up: 0,
 };
 
 function ActionPanel({ action }: { action: ActionCounts }) {
-  const hasAction = action.overdue + action.breaching + action.needs_review + action.escalated + action.needs_follow_up > 0;
+  const hasAction = action.overdue + action.breaching + action.needs_review + action.needs_follow_up > 0;
   const items = [
     {
       label: "Overdue",
@@ -146,13 +144,6 @@ function ActionPanel({ action }: { action: ActionCounts }) {
       detail: "Waiting for staff triage",
       href: incidentHref({ window_days: 30, status: "needs_review", sort: "action" }),
       tone: "border-amber-200 bg-amber-50 text-amber-950",
-    },
-    {
-      label: "Escalated",
-      value: action.escalated,
-      detail: "Requires authority attention",
-      href: incidentHref({ window_days: 30, status: "escalated", sort: "action" }),
-      tone: "border-purple-200 bg-purple-50 text-purple-950",
     },
   ];
 
@@ -261,7 +252,7 @@ export default function DashboardPage() {
   const sparkCritical = byDay.map((d) => ({ date: d.date, count: d.critical ?? 0 }));
   const statusCount = (s: string) => byStatus.find((x) => x.status === s)?.count ?? 0;
   const sevCount = (s: string) => bySev.find((x) => x.severity === s)?.count ?? 0;
-  const open = statusCount("processing") + statusCount("needs_review") + statusCount("verified") + statusCount("escalated") + statusCount("awaiting_verification") + statusCount("needs_follow_up");
+  const open = statusCount("processing") + statusCount("needs_review") + statusCount("verified") + statusCount("awaiting_verification") + statusCount("needs_follow_up");
   const resolved = statusCount("resolved") + statusCount("community_confirmed");
   const critical = sevCount("critical");
   const maxDay = Math.max(1, ...byDay.map((d) => d.count));
@@ -270,7 +261,7 @@ export default function DashboardPage() {
 
   const incidents = recent.data?.items ?? [];
   const feed = incidents.slice(0, 6);
-  const queue = incidents.filter((i) => i.status === "needs_review" || i.status === "escalated").slice(0, 5);
+  const queue = incidents.filter((i) => i.status === "needs_review").slice(0, 5);
 
   const todayCount = byDay.length > 0 ? byDay[byDay.length - 1].count : 0;
   const prevCount = byDay.length > 1 ? byDay[byDay.length - 2].count : null;
@@ -281,13 +272,7 @@ export default function DashboardPage() {
         ? "same as yesterday"
         : `${todayCount > prevCount ? "+" : ""}${todayCount - prevCount} vs yesterday`;
   const needsReview = statusCount("needs_review");
-  const escalated = statusCount("escalated");
-  const attentionSub =
-    needsReview > 0
-      ? `${needsReview} awaiting review`
-      : escalated > 0
-        ? `${escalated} escalated — needs action`
-        : "queue is clear";
+  const attentionSub = needsReview > 0 ? `${needsReview} awaiting review` : "queue is clear";
   const activeEntry = activeCat !== null ? byCat[activeCat] : undefined;
 
   return (
@@ -516,12 +501,6 @@ export default function DashboardPage() {
                   <li key={i.id}>
                     <Link href={`/incidents/${i.id}`} className="flex items-center gap-3 py-2.5 transition hover:bg-zinc-50">
                       <span className="h-9 w-1 shrink-0 rounded-full" style={{ background: vm.color }} title={`${vm.label} severity`} />
-                      {i.status === "escalated" && (
-                        <span className="relative flex h-2 w-2 shrink-0" title="Needs action">
-                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-purple-500 opacity-60" />
-                          <span className="relative inline-flex h-2 w-2 rounded-full bg-purple-600" />
-                        </span>
-                      )}
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold">{i.title}</p>
                         <p className="truncate text-xs text-zinc-500">
@@ -540,7 +519,7 @@ export default function DashboardPage() {
           )}
           {queue.length > 0 && (
             <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              <b>{queue.length}</b> item{queue.length === 1 ? "" : "s"} needing review or escalated — oldest first in <Link href={incidentHref({ window_days: 30, state: "needs_attention", sort: "action" })} className="font-bold underline">Incidents</Link>.
+              <b>{queue.length}</b> item{queue.length === 1 ? "" : "s"} needing review — oldest first in <Link href={incidentHref({ window_days: 30, state: "needs_attention", sort: "action" })} className="font-bold underline">Incidents</Link>.
             </div>
           )}
         </Card>

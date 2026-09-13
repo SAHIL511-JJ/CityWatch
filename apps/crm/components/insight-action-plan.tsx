@@ -48,8 +48,8 @@ export function InsightActionPlan({ plan, compact = false }: { plan: InsightActi
               <p className="mt-1 text-sm font-semibold leading-5 text-[#14231a]">{plan.authority}</p>
             </div>
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Escalate when</p>
-              <ul className="mt-1 space-y-1.5 text-sm leading-5 text-zinc-700">{plan.escalate_when.map((item) => <li key={item}>• {item}</li>)}</ul>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Contact authority when</p>
+              <ul className="mt-1 space-y-1.5 text-sm leading-5 text-zinc-700">{plan.contact_authority_when.map((item) => <li key={item}>• {item}</li>)}</ul>
             </div>
           </div>
         )}

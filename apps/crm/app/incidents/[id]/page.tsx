@@ -73,7 +73,6 @@ function timeAgo(iso: string): string {
 const DOT: Record<string, string> = {
   verified: "bg-green-500",
   rejected: "bg-red-500",
-  escalated: "bg-purple-500",
   resolved: "bg-blue-500",
   awaiting_verification: "bg-amber-500",
   community_confirmed: "bg-emerald-500",
@@ -87,7 +86,6 @@ const DOT: Record<string, string> = {
 const ACTION_STYLE: Record<string, string> = {
   verified: "bg-green-700 text-white hover:bg-green-600",
   rejected: "bg-white text-red-700 ring-1 ring-inset ring-red-300 hover:bg-red-50",
-  escalated: "bg-amber-600 text-white hover:bg-amber-500",
   resolved: "bg-blue-700 text-white hover:bg-blue-600",
   closed: "bg-transparent text-zinc-500 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-100",
 };
@@ -95,7 +93,6 @@ const ACTION_STYLE: Record<string, string> = {
 const STATUS_ACTION_LABEL: Partial<Record<IncidentStatus, string>> = {
   verified: "Approve",
   rejected: "Reject",
-  escalated: "Escalate",
   closed: "Emergency close",
 };
 
@@ -463,7 +460,7 @@ export default function IncidentDetailPage() {
   const pendingFollowUps = resolutionEvidence.filter(
     (item) => item.evidence_type === "community_follow_up" && item.review_outcome === "pending"
   );
-  const canSubmitAuthority = ["verified", "escalated", "resolved", "needs_follow_up"].includes(data.status);
+  const canSubmitAuthority = ["verified", "resolved", "needs_follow_up"].includes(data.status);
   const resolutionStatus = ["awaiting_verification", "community_confirmed", "needs_follow_up", "resolved"].includes(data.status);
   const allowedStatuses = data.allowed_statuses ?? [];
   const normalAllowedStatuses = allowedStatuses.filter((status) => status !== "closed");
@@ -514,7 +511,7 @@ export default function IncidentDetailPage() {
             }
           : {
               title: "Complete triage before resolution",
-              detail: "Use the triage controls first. Resolution evidence becomes available once this report is verified or escalated.",
+              detail: "Use the triage controls first. Resolution evidence becomes available once this report is verified.",
               owner: "Staff",
               current: 0,
               tone: "border-zinc-200 bg-zinc-50",
@@ -728,7 +725,7 @@ export default function IncidentDetailPage() {
                 {submitAuthority.error && <p className="mt-2 text-xs text-red-600">{(submitAuthority.error as Error).message}</p>}
               </>
             ) : (
-              <p className="text-sm text-zinc-500">Resolve the incident through triage first; authority evidence is available from a verified or escalated report.</p>
+              <p className="text-sm text-zinc-500">Resolve the incident through triage first; authority evidence is available from a verified report.</p>
             )}
             {pendingFollowUps.length > 0 && (
               <div id="pending-review" className="mt-4 space-y-3 border-t border-zinc-200 pt-4">
