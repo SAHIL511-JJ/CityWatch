@@ -27,6 +27,13 @@ from .auth import (
 )
 from .config import settings
 from .db import SessionLocal, get_db
+from .incident_status import (
+    AI_SOURCE_STATUSES,
+    ALL_INCIDENT_STATUSES,
+    TRIAGE_STATUSES as POLICY_TRIAGE_STATUSES,
+    allowed_manual_statuses,
+    can_manual_transition,
+)
 from .models import (
     Category,
     Incident,
@@ -72,15 +79,8 @@ app.add_middleware(
 )
 
 ALLOWED_TYPES = {"image/jpeg": ".jpg", "image/png": ".png"}
-TRIAGE_STATUSES = {
-    "processing",
-    "needs_review",
-    "verified",
-    "rejected",
-    "escalated",
-    "closed",
-}
-VALID_INCIDENT_STATUSES = TRIAGE_STATUSES | RESOLUTION_STATUSES | {"resolved"}
+TRIAGE_STATUSES = POLICY_TRIAGE_STATUSES
+VALID_INCIDENT_STATUSES = ALL_INCIDENT_STATUSES
 PUBLIC_CITIZEN_INCIDENT_STATUSES = {"verified", "awaiting_verification"}
 TERMINAL_INCIDENT_STATUSES = {"resolved", "community_confirmed", "closed"}
 INCIDENT_QUEUES = {"mine", "unassigned"}
@@ -124,6 +124,7 @@ class AdminLoginIn(BaseModel):
 
 class AdminPatchIn(BaseModel):
     status: str | None = None
+    status_reason: str | None = Field(default=None, max_length=2000)
     severity: str | None = None
     assigned_to: str | None = None
 
@@ -266,6 +267,12 @@ def incident_out(i: Incident) -> dict:
         "assigned_to": str(i.assigned_to) if i.assigned_to else None,
         "created_at": i.created_at.isoformat() if i.created_at else None,
     }
+
+
+def admin_incident_out(i: Incident) -> dict:
+    out = incident_out(i)
+    out["allowed_statuses"] = list(allowed_manual_statuses(i.status))
+    return out
 
 
 def public_incident_out(i: Incident) -> dict:
@@ -964,7 +971,7 @@ def admin_list(
     actual_page = min(page, total_pages) if total_pages else 1
     rows = _order_incidents(query, sort).offset((actual_page - 1) * page_size).limit(page_size).all()
     return {
-        "items": [incident_out(row) for row in rows],
+        "items": [admin_incident_out(row) for row in rows],
         "total": total,
         "page": actual_page,
         "page_size": page_size,
@@ -983,14 +990,41 @@ def admin_patch(
     if i is None:
         raise HTTPException(404, "not found")
     old = i.status
-    if body.status:
-        if body.status not in TRIAGE_STATUSES:
-            if body.status in RESOLUTION_STATUSES or body.status == "resolved":
-                raise HTTPException(
-                    409, "use the resolution evidence workflow for this status"
-                )
+    if body.status is not None:
+        if body.status not in VALID_INCIDENT_STATUSES:
             raise HTTPException(422, "bad status")
+        if body.status in RESOLUTION_STATUSES or body.status == "resolved":
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "resolution_workflow_required",
+                    "message": "use the resolution evidence workflow for this status",
+                    "current_status": old,
+                    "requested_status": body.status,
+                },
+            )
+        if not can_manual_transition(old, body.status):
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "invalid_status_transition",
+                    "message": "status transition is not allowed",
+                    "current_status": old,
+                    "requested_status": body.status,
+                    "allowed_statuses": list(allowed_manual_statuses(old)),
+                },
+            )
+        if body.status != "closed" and body.status_reason is not None:
+            raise HTTPException(422, "status_reason is only valid when closing")
+        if body.status == "closed" and old != "closed":
+            close_reason = clean_note(body.status_reason, "status_reason")
+        else:
+            close_reason = None
         i.status = body.status
+    elif body.status_reason is not None:
+        raise HTTPException(422, "status_reason requires status=closed")
+    else:
+        close_reason = None
     if body.severity:
         i.severity = body.severity
     # assigned_to uses field-set presence so explicit null unassigns.
@@ -1000,14 +1034,26 @@ def admin_patch(
         ):
             raise HTTPException(422, "assignee is not staff")
         i.assigned_to = body.assigned_to
-    db.add(
-        StatusHistory(
-            incident_id=i.id, old_status=old, new_status=i.status, changed_by=staff.id
+    if old != i.status:
+        db.add(
+            StatusHistory(
+                incident_id=i.id,
+                old_status=old,
+                new_status=i.status,
+                changed_by=staff.id,
+            )
         )
-    )
+        if close_reason is not None:
+            db.add(
+                IncidentNote(
+                    incident_id=i.id,
+                    staff_id=staff.id,
+                    note=f"Emergency close: {close_reason}",
+                )
+            )
     db.commit()
     db.refresh(i)
-    return incident_out(i)
+    return admin_incident_out(i)
 
 
 @app.post("/admin/incidents/{incident_id}/notes")
@@ -1238,12 +1284,9 @@ def admin_split(
 
 # ---------- bulk triage (KAN-16) ----------
 BULK_STATUS = {
-    "processing",
-    "needs_review",
     "verified",
     "rejected",
     "escalated",
-    "closed",
 }
 BULK_SEVERITY = {"low", "medium", "high", "critical"}
 
@@ -1316,12 +1359,47 @@ def admin_bulk(
         explicit_ids = [str(row.id) for row in target_query.all()]
     matched = len(explicit_ids)
     results = []
-    unset_assign = "assigned_to" in body.model_fields_set and body.assigned_to is None
+    records = []
+    missing_ids = []
     for iid in explicit_ids:
         i = db.get(Incident, iid)
         if i is None:
+            missing_ids.append(iid)
             results.append({"id": iid, "ok": False, "error": "not found"})
             continue
+        records.append(i)
+
+    if body.status is not None:
+        if missing_ids:
+            raise HTTPException(
+                404,
+                detail={
+                    "code": "bulk_incident_not_found",
+                    "message": "one or more incidents were not found",
+                    "ids": missing_ids,
+                },
+            )
+        invalid = [
+            {
+                "id": str(i.id),
+                "current_status": i.status,
+                "allowed_statuses": list(allowed_manual_statuses(i.status)),
+            }
+            for i in records
+            if not can_manual_transition(i.status, body.status)
+        ]
+        if invalid:
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "invalid_bulk_status_transition",
+                    "message": "the requested status is not allowed for every selected incident",
+                    "requested_status": body.status,
+                    "invalid_incidents": invalid,
+                },
+            )
+    unset_assign = "assigned_to" in body.model_fields_set and body.assigned_to is None
+    for i in records:
         changed = []
         if body.status is not None and body.status != i.status:
             changed.append("status")
@@ -1340,7 +1418,7 @@ def admin_bulk(
             i.assigned_to = None
         elif body.assigned_to is not None:
             i.assigned_to = body.assigned_to
-        if changed:
+        if body.status is not None and old != i.status:
             db.add(
                 StatusHistory(
                     incident_id=i.id,
@@ -1353,7 +1431,7 @@ def admin_bulk(
     db.commit()
     return {
         "matched": matched,
-        "updated": sum(1 for r in results if r["ok"]),
+        "updated": sum(1 for r in results if r["ok"] and r["changed"]),
         "results": results,
     }
 
@@ -1424,10 +1502,20 @@ def admin_analyze(
     i = db.get(Incident, incident_id)
     if i is None:
         raise HTTPException(404, "not found")
-    if i.status in RESOLUTION_STATUSES or i.status == "community_confirmed":
-        raise HTTPException(409, "use the resolution evidence workflow for this status")
+    if i.status not in AI_SOURCE_STATUSES:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "ai_analysis_not_allowed",
+                "message": "AI analysis can only run for processing or needs review incidents",
+                "current_status": i.status,
+                "allowed_statuses": list(AI_SOURCE_STATUSES),
+            },
+        )
     res = run_ai(i.title or "", i.description or "", i.photo_url)
-    status = apply_ai_result(db, i, res, changed_by=staff.id)
+    status = apply_ai_result(
+        db, i, res, changed_by=staff.id, allow_review_reanalysis=True
+    )
     return {"id": str(i.id), "status": status, "ai": res}
 
 
@@ -1453,7 +1541,7 @@ def admin_get(
         .all()
     )
     rep = db.get(User, i.reporter_id) if i.reporter_id else None
-    out = incident_out(i)
+    out = admin_incident_out(i)
     out["reporter"] = (
         {
             "id": str(rep.id),
@@ -1539,7 +1627,7 @@ def submit_authority_resolution_evidence(
         db.rollback()
         print(f"[resolution-evidence] orphaned upload after commit failure: {photo_url}")
         raise HTTPException(502, "could not save resolution evidence") from exc
-    return {"incident": incident_out(incident), "evidence": private_evidence_out(evidence)}
+    return {"incident": admin_incident_out(incident), "evidence": private_evidence_out(evidence)}
 
 
 @app.get("/admin/incidents/{incident_id}/resolution-evidence")
@@ -1626,7 +1714,7 @@ def review_resolution_evidence(
     except Exception as exc:
         db.rollback()
         raise HTTPException(502, "could not save resolution review") from exc
-    return {"incident": incident_out(incident), "evidence": private_evidence_out(evidence)}
+    return {"incident": admin_incident_out(incident), "evidence": private_evidence_out(evidence)}
 
 
 @app.get("/admin/incidents/{incident_id}/photo")

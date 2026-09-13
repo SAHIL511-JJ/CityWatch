@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, getApiBase, getToken } from "@/lib/api";
-import type { DuplicatePair, IncidentDetail, ResolutionEvidence, Severity, StaffMember, StatusHistoryEntry } from "@/lib/types";
+import type { DuplicatePair, IncidentDetail, IncidentStatus, ResolutionEvidence, Severity, StaffMember, StatusHistoryEntry } from "@/lib/types";
 import { staffName } from "@/lib/types";
 import { categoryLabel } from "@/lib/taxonomy";
 import { Badge } from "@/components/ui/badge";
@@ -92,12 +92,11 @@ const ACTION_STYLE: Record<string, string> = {
   closed: "bg-transparent text-zinc-500 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-100",
 };
 
-const DISABLE_HINT: Record<string, string> = {
-  verified: "Already verified — pick another action to change status",
-  rejected: "Already rejected",
-  escalated: "Already escalated",
-  resolved: "Already resolved",
-  closed: "Already closed",
+const STATUS_ACTION_LABEL: Partial<Record<IncidentStatus, string>> = {
+  verified: "Approve",
+  rejected: "Reject",
+  escalated: "Escalate",
+  closed: "Emergency close",
 };
 
 function initialsOf(id: string | null | undefined): string {
@@ -254,7 +253,7 @@ export default function IncidentDetailPage() {
   const [reason, setReason] = useState("");
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [hideNoops, setHideNoops] = useState(true);
-  const [toast, setToast] = useState<{ msg: string; undo: () => void } | null>(null);
+  const [toast, setToast] = useState<{ msg: string; undo?: () => void } | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [authorityAction, setAuthorityAction] = useState("");
   const [authorityPhoto, setAuthorityPhoto] = useState<File | null>(null);
@@ -465,6 +464,14 @@ export default function IncidentDetailPage() {
     (item) => item.evidence_type === "community_follow_up" && item.review_outcome === "pending"
   );
   const canSubmitAuthority = ["verified", "escalated", "resolved", "needs_follow_up"].includes(data.status);
+  const resolutionStatus = ["awaiting_verification", "community_confirmed", "needs_follow_up", "resolved"].includes(data.status);
+  const allowedStatuses = data.allowed_statuses ?? [];
+  const normalAllowedStatuses = allowedStatuses.filter((status) => status !== "closed");
+  const canEmergencyClose = allowedStatuses.includes("closed");
+  const analysisAllowed = ["processing", "needs_review"].includes(data.status);
+  const isMergedDuplicate = data.status === "closed" && (data.notes ?? []).some(
+    (item) => item.note.startsWith("Merged into ") && item.note.includes("Split to reopen."),
+  );
   const resolutionStage = data.status === "community_confirmed"
     ? {
         title: "Resolution confirmed by the community",
@@ -473,6 +480,14 @@ export default function IncidentDetailPage() {
         current: 3,
         tone: "border-emerald-200 bg-emerald-50",
       }
+    : data.status === "closed"
+      ? {
+          title: "Incident closed by administration",
+          detail: "This incident is no longer active. Its evidence and audit trail remain available for reference.",
+          owner: "No further action",
+          current: 0,
+          tone: "border-zinc-300 bg-zinc-100",
+        }
     : data.status === "awaiting_verification" && pendingFollowUps.length > 0
       ? {
           title: "Community follow-up ready for review",
@@ -511,23 +526,22 @@ export default function IncidentDetailPage() {
   const hasCoords = typeof data.lat === "number" && typeof data.lng === "number";
 
   const doStatus = async (status: string, withReason?: string) => {
-    const prev = data.status;
-    await patch.mutateAsync({ status });
-    if (withReason?.trim()) {
-      await addNote.mutateAsync(`Status → ${status}: ${withReason.trim()}`);
+    const trimmedReason = withReason?.trim();
+    await patch.mutateAsync(
+      status === "closed"
+        ? { status, status_reason: trimmedReason ?? "" }
+        : { status },
+    );
+    if (status !== "closed" && trimmedReason) {
+      await addNote.mutateAsync(`Status → ${status}: ${trimmedReason}`);
     }
     setConfirming(null);
     setReason("");
-    setToast({
-      msg: `Status set to ${status}`,
-      undo: () => {
-        patch.mutate({ status: prev });
-        setToast(null);
-      },
-    });
+    setToast({ msg: `Status set to ${status}` });
   };
 
   const rerunAnalysis = async () => {
+    if (!analysisAllowed) return;
     setAnalyzing(true);
     try {
       await apiFetch(`/admin/incidents/${id}/analyze`, { method: "POST" });
@@ -596,22 +610,24 @@ export default function IncidentDetailPage() {
           </div>
           <span className="rounded-md bg-white/80 px-2.5 py-1 text-xs font-medium text-zinc-600 ring-1 ring-inset ring-zinc-200">Next owner: {resolutionStage.owner}</span>
         </div>
-        <ol aria-label="Resolution stages" className="mt-4 grid gap-2 sm:grid-cols-3">
-          {[
-            [1, "Authority action", "After-photo"],
-            [2, "Community follow-up", "Current observation"],
-            [3, "Staff confirmation", "Confirm or request work"],
-          ].map(([number, label, hint]) => {
-            const complete = resolutionStage.current > Number(number) || (number === 3 && data.status === "community_confirmed");
-            const current = resolutionStage.current === Number(number);
-            return (
-              <li key={number} className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-xs ${current ? "bg-white text-zinc-900 ring-1 ring-inset ring-zinc-300" : "text-zinc-500"}`}>
-                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${complete ? "bg-emerald-700 text-white" : current ? "bg-[#14231a] text-white" : "bg-zinc-200 text-zinc-500"}`}>{complete ? "✓" : number}</span>
-                <span><strong className="block font-semibold">{label}</strong><span className="text-[11px] text-zinc-500">{hint}</span></span>
-              </li>
-            );
-          })}
-        </ol>
+        {data.status !== "closed" && (
+          <ol aria-label="Resolution stages" className="mt-4 grid gap-2 sm:grid-cols-3">
+            {[
+              [1, "Authority action", "After-photo"],
+              [2, "Community follow-up", "Current observation"],
+              [3, "Staff confirmation", "Confirm or request work"],
+            ].map(([number, label, hint]) => {
+              const complete = resolutionStage.current > Number(number) || (number === 3 && data.status === "community_confirmed");
+              const current = resolutionStage.current === Number(number);
+              return (
+                <li key={number} className={`flex items-center gap-2 rounded-md px-2.5 py-2 text-xs ${current ? "bg-white text-zinc-900 ring-1 ring-inset ring-zinc-300" : "text-zinc-500"}`}>
+                  <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${complete ? "bg-emerald-700 text-white" : current ? "bg-[#14231a] text-white" : "bg-zinc-200 text-zinc-500"}`}>{complete ? "✓" : number}</span>
+                  <span><strong className="block font-semibold">{label}</strong><span className="text-[11px] text-zinc-500">{hint}</span></span>
+                </li>
+              );
+            })}
+          </ol>
+        )}
         {data.status === "awaiting_verification" && pendingFollowUps.length > 0 && (
           <button type="button" onClick={() => document.getElementById("pending-review")?.scrollIntoView({ behavior: "smooth", block: "center" })} className="mt-3 rounded-md bg-[#14231a] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[#2a4a33] active:translate-y-px focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Review follow-up</button>
         )}
@@ -974,7 +990,8 @@ export default function IncidentDetailPage() {
               <h2 className="text-sm font-semibold tracking-wide text-zinc-500">AI verdict</h2>
               <button
                 onClick={rerunAnalysis}
-                disabled={analyzing}
+                disabled={analyzing || !analysisAllowed}
+                title={!analysisAllowed ? "AI analysis is only available for processing or needs review incidents" : undefined}
                 className="ml-auto inline-flex items-center justify-center rounded-md bg-white px-4 py-2 text-xs font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 hover:bg-zinc-100 disabled:opacity-50"
               >
                 {analyzing && (
@@ -1027,53 +1044,62 @@ export default function IncidentDetailPage() {
         {/* Right: actions + record */}
         <div className="space-y-5 lg:col-span-2">
           <Card>
-            <SectionTitle>Moderate</SectionTitle>
-            <p className="mb-1 text-xs font-medium text-zinc-500">Set status</p>
-            <div className="flex flex-wrap gap-2">
-              {(
-                [
-                  ["verified", "Approve"],
-                  ["rejected", "Reject"],
-                  ["escalated", "Escalate"],
-                  ["closed", "Close"],
-                ] as const
-              ).map(([status, label]) => {
-                const disabled = data.status === status || patch.isPending;
-                return (
-                  <span key={status} title={disabled && data.status === status ? DISABLE_HINT[status] : `${label} this incident`}>
-                    <button
-                      disabled={disabled}
-                      onClick={() =>
-                        status === "rejected" || status === "closed"
-                          ? setConfirming(status)
-                          : doStatus(status)
-                      }
-                      className={`inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50 ${ACTION_STYLE[status]}`}
-                    >
-                      {label}
-                    </button>
-                  </span>
-                );
-              })}
-            </div>
-            {data.status !== "verified" && data.status !== "closed" && (
-              <p className="mt-1.5 text-xs text-zinc-500">
-                Current status is <strong className="capitalize">{data.status.replace("_", " ")}</strong> — Approve
-                marks it verified.
+            <SectionTitle>Available actions</SectionTitle>
+            {resolutionStatus ? (
+              <p className="text-sm text-zinc-600">
+                This incident is in the resolution workflow. Use the resolution panel to review community evidence and confirm or request more work.
               </p>
+            ) : normalAllowedStatuses.length > 0 ? (
+              <>
+                <p className="mb-1 text-xs font-medium text-zinc-500">Normal status actions</p>
+                <div className="flex flex-wrap gap-2">
+                  {normalAllowedStatuses.map((status) => {
+                    const label = STATUS_ACTION_LABEL[status] ?? status;
+                    return (
+                      <button
+                        key={status}
+                        disabled={patch.isPending}
+                        onClick={() => status === "rejected" ? setConfirming(status) : doStatus(status)}
+                        className={`inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50 ${ACTION_STYLE[status]}`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-1.5 text-xs text-zinc-500">
+                  Available actions for <strong className="capitalize">{data.status.replace("_", " ")}</strong> are shown above.
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-zinc-600">There are no normal moderation actions available for this status.</p>
             )}
+            {canEmergencyClose && (
+              <div className="mt-4 border-t border-zinc-200 pt-3">
+                <p className="text-xs font-medium text-zinc-500">Emergency action</p>
+                <button
+                  disabled={patch.isPending}
+                  onClick={() => setConfirming("closed")}
+                  className={`mt-1.5 inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium disabled:opacity-50 ${ACTION_STYLE.closed}`}
+                >
+                  Emergency close
+                </button>
+                <p className="mt-1.5 text-xs text-zinc-500">Administrative override — stops this incident’s active workflow. A reason is required and recorded in the incident history.</p>
+              </div>
+            )}
+            {patch.error && <p className="mt-3 text-sm text-red-700" role="alert">Status update failed: {(patch.error as Error).message}</p>}
             {confirming && (
               <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3" role="alertdialog" aria-label={`Confirm ${confirming}`}>
                 <p className="text-sm font-medium capitalize text-amber-900">
-                  {confirming} this incident?
+                  {confirming === "closed" ? "Emergency close this incident?" : `${confirming} this incident?`}
                 </p>
                 <Input
                   autoFocus
-                  placeholder="Reason (saved to the notes thread)…"
+                  placeholder={confirming === "closed" ? "Reason required — saved to the incident record…" : "Reason (saved to the notes thread)…"}
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") doStatus(confirming, reason);
+                    if (e.key === "Enter" && (confirming !== "closed" || reason.trim())) doStatus(confirming, reason);
                     if (e.key === "Escape") {
                       setConfirming(null);
                       setReason("");
@@ -1083,11 +1109,11 @@ export default function IncidentDetailPage() {
                 />
                 <div className="mt-2 flex gap-2">
                   <button
-                    disabled={patch.isPending}
+                    disabled={patch.isPending || (confirming === "closed" && !reason.trim())}
                     onClick={() => doStatus(confirming, reason)}
                     className="inline-flex items-center justify-center rounded-md bg-red-700 px-4 py-2 text-sm font-medium text-white hover:bg-red-600 disabled:opacity-50"
                   >
-                    Confirm {confirming}
+                    Confirm {confirming === "closed" ? "emergency close" : confirming}
                   </button>
                   <button
                     onClick={() => {
@@ -1187,7 +1213,7 @@ export default function IncidentDetailPage() {
                   {myDupes.length}
                 </span>
               )}
-              {data.status === "closed" && (
+              {isMergedDuplicate && (
                 <button
                   onClick={() => split.mutate()}
                   disabled={split.isPending}
@@ -1376,12 +1402,14 @@ export default function IncidentDetailPage() {
           className="fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-lg bg-zinc-900 px-4 py-2.5 text-sm text-white shadow-lg"
         >
           {toast.msg}
-          <button
-            onClick={toast.undo}
-            className="rounded px-2 py-0.5 font-medium text-amber-300 hover:bg-white/10"
-          >
-            Undo
-          </button>
+          {toast.undo && (
+            <button
+              onClick={toast.undo}
+              className="rounded px-2 py-0.5 font-medium text-amber-300 hover:bg-white/10"
+            >
+              Undo
+            </button>
+          )}
         </div>
       )}
     </div>

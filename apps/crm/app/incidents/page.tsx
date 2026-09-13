@@ -227,6 +227,12 @@ function IncidentsInner() {
 
   const rows = data?.items ?? [];
   const selectedIds = rows.filter((row) => selected[row.id]).map((row) => row.id);
+  const selectedRows = rows.filter((row) => selected[row.id]);
+  const commonBulkStatusActions = selectionMode === "page"
+    ? (["verified", "rejected", "escalated"] as const).filter((status) =>
+        selectedRows.every((row) => row.allowed_statuses?.includes(status)),
+      )
+    : [];
   const pageSelected = rows.length > 0 && rows.every((row) => selected[row.id]);
   const hasScope = !!scope.q || !!scope.status || !!scope.severity || !!scope.queue || !!scope.window_days || !!scope.state || !!scope.sla || scope.sort !== "newest" || scope.page > 1;
   const total = data?.total ?? 0;
@@ -379,7 +385,11 @@ function IncidentsInner() {
         <Card className="space-y-3 border-[#2a4a33] bg-[#f2f6f0]" role="region" aria-label="Bulk actions">
           <div className="flex flex-wrap items-center gap-2">
             <strong className="mr-2 text-sm">{selectionText}</strong>
-            {([["verified", "Approve"], ["rejected", "Reject"], ["escalated", "Escalate"]] as const).map(([value, label]) => <button key={value} type="button" disabled={bulk.isPending} onClick={() => setPendingBulk({ kind: "status", value, label })} className="inline-flex items-center justify-center rounded-md bg-[#14231a] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[#2a4a33] active:translate-y-px disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">{label}</button>)}
+            {commonBulkStatusActions.map((value) => {
+              const label = value === "verified" ? "Approve" : value === "rejected" ? "Reject" : "Escalate";
+              return <button key={value} type="button" disabled={bulk.isPending} onClick={() => setPendingBulk({ kind: "status", value, label })} className="inline-flex items-center justify-center rounded-md bg-[#14231a] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[#2a4a33] active:translate-y-px disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">{label}</button>;
+            })}
+            {selectionMode === "filtered" ? <p className="text-xs text-zinc-600">Select compatible incidents on this page to change status in bulk. Select-all matching is available for assignment only.</p> : commonBulkStatusActions.length === 0 && <p className="text-xs text-zinc-600">No shared status action is available for every selected incident.</p>}
             <select aria-label="Bulk assign to staff" className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-[#2a4a33] focus:ring-2 focus:ring-[#dce8dc]" value={bulkAssignee} onChange={(event) => setBulkAssignee(event.target.value)}>
               <option value="">Assign to…</option>
               {(staff.data ?? []).map((member) => <option key={member.id} value={member.id}>{staffName(member.email, member.id)} ({member.role})</option>)}

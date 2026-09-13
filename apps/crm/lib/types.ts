@@ -37,6 +37,7 @@ export interface Incident {
   ai_analysis?: Record<string, unknown> | null;
   reporter_id?: string;
   assigned_to?: string | null;
+  allowed_statuses?: IncidentStatus[];
   created_at: string;
 }
 

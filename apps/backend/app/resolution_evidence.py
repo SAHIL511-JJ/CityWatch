@@ -12,22 +12,16 @@ from typing import Any
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from .incident_status import (
+    AUTHORITY_START_STATUSES,
+    OPERATIONAL_STATUSES,
+    RESOLUTION_STATUSES,
+)
 from .models import Incident, ResolutionEvidence, StatusHistory
 from .storage import get_storage
 
 EVIDENCE_TYPES = {"authority_resolution", "community_follow_up"}
 REVIEW_OUTCOMES = {"not_applicable", "pending", "confirmed", "needs_follow_up"}
-AUTHORITY_START_STATUSES = {"verified", "escalated", "resolved", "needs_follow_up"}
-RESOLUTION_STATUSES = {"awaiting_verification", "community_confirmed", "needs_follow_up"}
-OPERATIONAL_STATUSES = {
-    "verified",
-    "escalated",
-    "resolved",
-    "awaiting_verification",
-    "community_confirmed",
-    "needs_follow_up",
-    "closed",
-}
 MAX_NOTE_LENGTH = 2000
 ALLOWED_PHOTO_TYPES = {"image/jpeg": ".jpg", "image/png": ".png"}
 

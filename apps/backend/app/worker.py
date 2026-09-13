@@ -12,6 +12,7 @@ import os
 from celery import Celery
 
 from .config import settings
+from .incident_status import can_ai_transition
 from .taxonomy import ENVIRONMENTAL_CATEGORIES, canonical_category
 
 celery = Celery(
@@ -204,7 +205,9 @@ def send_fcm_stub(tokens: list[str], title: str, body: str) -> None:
     messaging.send_each_for_multicast(msg)
 
 
-def apply_ai_result(db, inc, res: dict, changed_by=None) -> str:
+def apply_ai_result(
+    db, inc, res: dict, changed_by=None, *, allow_review_reanalysis: bool = False
+) -> str:
     """Shared status update used by Celery task and sync admin endpoint."""
     from .models import StatusHistory, User
 
@@ -212,29 +215,40 @@ def apply_ai_result(db, inc, res: dict, changed_by=None) -> str:
     conf = float(res["confidence"])
     old = inc.status
     if not res["is_legitimate"]:
-        inc.status = "rejected"
+        target_status = "rejected"
     elif conf >= 0.7:
-        inc.status = "verified"
+        target_status = "verified"
     else:
-        inc.status = "needs_review"
+        target_status = "needs_review"
     inc.severity = res["severity"]
     inc.ai_confidence = conf
     inc.ai_analysis = res
-    if inc.reporter_id:
+    source_allowed = old == "processing" or (
+        allow_review_reanalysis and old == "needs_review"
+    )
+    status_changed = (
+        source_allowed
+        and can_ai_transition(old, target_status)
+        and target_status != old
+    )
+    if status_changed:
+        inc.status = target_status
+    if status_changed and inc.reporter_id:
         u = db.get(User, inc.reporter_id)
         if u is not None:
             u.trust_score = max(
                 0.1,
-                min(1.0, u.trust_score + (0.02 if inc.status == "verified" else -0.05)),
+                min(1.0, u.trust_score + (0.02 if target_status == "verified" else -0.05)),
             )
-    db.add(
-        StatusHistory(
-            incident_id=inc.id,
-            old_status=old,
-            new_status=inc.status,
-            changed_by=changed_by,
+    if status_changed:
+        db.add(
+            StatusHistory(
+                incident_id=inc.id,
+                old_status=old,
+                new_status=inc.status,
+                changed_by=changed_by,
+            )
         )
-    )
     db.commit()
     db.refresh(inc)
     return inc.status
