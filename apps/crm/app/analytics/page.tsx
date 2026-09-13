@@ -119,32 +119,46 @@ function FilterBar({
     filters.status !== DEFAULT_FILTERS.status ? { key: "status", label: `Status: ${filters.status === "all" ? "All operational" : humanize(filters.status)}`, clear: { status: DEFAULT_FILTERS.status } } : null,
     filters.bounds ? { key: "bounds", label: "Map area", clear: { bounds: null } } : null,
   ].filter(Boolean) as Array<{ key: string; label: string; clear: Partial<InsightsFilters> }>;
+  const modifiers = activeFilters.filter((item) => item.key !== "window_days" && item.key !== "status" && item.key !== "bounds");
+  const isPresetActive = (preset: InsightsFilters) => (
+    filters.window_days === preset.window_days
+    && filters.radius_km === preset.radius_km
+    && filters.category === preset.category
+    && filters.severity === preset.severity
+    && filters.trend === preset.trend
+    && filters.status === preset.status
+    && filters.bounds === null
+  );
 
   return (
-    <section aria-label="Insight scope controls" className="rounded-2xl border border-[#dfe5dd] bg-white p-4 shadow-[0_8px_25px_rgba(20,35,26,0.05)] lg:p-5">
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+    <section aria-label="Insight scope controls" className="rounded-2xl border border-[#dfe5dd] bg-white p-4 lg:p-5">
+      <div className="flex flex-col gap-3.5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#55705c]">Start with a scope</p>
-            <p className="mt-1 text-sm text-zinc-600">Choose a common view, then refine only when needed.</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[#55705c]">Investigation scope</p>
+            <p className="mt-1 text-sm text-zinc-600">Choose a saved view, then narrow it only when the evidence calls for it.</p>
           </div>
           <button type="button" onClick={onRefresh} disabled={refreshing} className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#14231a] px-4 py-2.5 text-sm font-semibold text-white transition duration-200 hover:bg-[#285e4a] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2 active:translate-y-px disabled:cursor-wait disabled:opacity-60">
             <span aria-hidden>{refreshing ? "○" : "↻"}</span>{refreshing ? "Refreshing" : "Refresh data"}
           </button>
         </div>
         <div className="grid gap-2 sm:grid-cols-3">
-          {INSIGHT_PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              aria-label={`${preset.label}: ${preset.hint}`}
-              onClick={() => onPreset(preset.filters)}
-              className="rounded-xl border border-[#dfe5dd] bg-[#fbfcfa] px-3.5 py-3 text-left transition hover:border-[#b8ccb9] hover:bg-[#f1f6ef] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-1"
-            >
-              <span className="block text-xs font-bold text-[#14231a]">{preset.label}</span>
-              <span className="mt-1 block text-[11px] text-zinc-500">{preset.hint}</span>
-            </button>
-          ))}
+          {INSIGHT_PRESETS.map((preset) => {
+            const selected = isPresetActive(preset.filters);
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                aria-label={`${preset.label}: ${preset.hint}`}
+                aria-pressed={selected}
+                onClick={() => onPreset(preset.filters)}
+                className={`rounded-xl border px-3.5 py-3 text-left transition focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-1 ${selected ? "border-[#2a4a33] bg-[#edf5ed] shadow-[inset_0_0_0_1px_rgba(42,74,51,0.08)]" : "border-[#dfe5dd] bg-[#fbfcfa] hover:border-[#b8ccb9] hover:bg-[#f1f6ef]"}`}
+              >
+                <span className="flex items-center justify-between gap-2"><span className="block text-xs font-bold text-[#14231a]">{preset.label}</span>{selected && <span className="rounded-full bg-[#2a4a33] px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.1em] text-white">Current</span>}</span>
+                <span className="mt-1 block text-[11px] text-zinc-500">{preset.hint}</span>
+              </button>
+            );
+          })}
         </div>
         <details className="rounded-xl border border-[#e4e9e2] bg-[#fbfcfa]">
           <summary className="cursor-pointer list-none px-3.5 py-3 text-sm font-semibold text-[#14231a] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-inset">
@@ -214,17 +228,20 @@ function FilterBar({
         </details>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-zinc-100 pt-3 text-xs text-zinc-500">
-        <span className="font-semibold text-[#14231a]">Showing {filters.window_days} days</span>
-        {activeFilters.map((item) => (
+        <span className="font-semibold text-[#14231a]">Current scope</span>
+        <span className="rounded-full bg-[#eef3ed] px-2.5 py-1 font-semibold text-[#2a4a33]">{filters.window_days} days</span>
+        <span className="rounded-full bg-[#eef3ed] px-2.5 py-1 font-semibold text-[#2a4a33]">{filters.status === "all" ? "All operational" : `${humanize(filters.status)} reports`}</span>
+        <span className="rounded-full bg-[#eef3ed] px-2.5 py-1 font-semibold text-[#2a4a33]">{filters.bounds ? "Map area" : "Citywide"}</span>
+        <span className="rounded-full bg-[#eef3ed] px-2.5 py-1 font-semibold text-[#2a4a33]">{filters.radius_km} km groups</span>
+        {modifiers.map((item) => (
           <span key={item.key} className="inline-flex items-center gap-1 rounded-full bg-[#eef3ed] px-2.5 py-1 text-[#2a4a33]">
             {item.label}
             <button type="button" aria-label={`Remove ${item.label}`} onClick={() => onChange(item.clear)} className="rounded-full px-1 font-bold hover:bg-[#dce8dc] focus:outline-none focus:ring-1 focus:ring-[#2a4a33]">×</button>
           </span>
         ))}
-        {activeFilters.length === 0 && <span>Citywide verified evidence</span>}
         <span className="text-zinc-300">·</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#2a4a33]" />High-confidence evidence · {filters.status === "all" ? "all operational statuses" : `${filters.status} reports`}</span>
-        {filters.bounds ? <><span>Map area applied</span><button type="button" onClick={() => onChange({ bounds: null })} className="font-semibold text-[#2a4a33] underline-offset-2 hover:underline">Clear map area</button></> : <span>Move the map to narrow the area</span>}
+        <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-[#2a4a33]" />High-confidence evidence</span>
+        {filters.bounds ? <button type="button" onClick={() => onChange({ bounds: null })} className="font-semibold text-[#2a4a33] underline-offset-2 hover:underline">Clear map area</button> : <span>Pan the map to narrow the area</span>}
         {mapUpdating && <span className="inline-flex items-center gap-1.5 text-[#2a4a33]"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#2a4a33]" />Updating map area</span>}
       </div>
     </section>
@@ -245,9 +262,23 @@ function SignalCard({ signal, filters, featured = false, selectedCategory = null
         <div className="shrink-0 text-right"><p className="text-3xl font-bold tabular-nums text-[#14231a]">{signal.persistence_score}</p><p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500" title="A 0–100 score combining recurrence, spread, contributor diversity, confidence, and recency">signal score ⓘ</p></div>
       </div>
       <p className="mt-5 max-w-[62ch] text-sm leading-6 text-zinc-700">{signal.explanation}</p>
-      <div className="mt-5"><InsightActionPlan plan={signal.action_plan} compact={!featured} /></div>
+      <div className="mt-5"><InsightActionPlan plan={signal.action_plan} compact={!featured} presentation={featured ? "stacked" : "default"} /></div>
       <div className="mt-5 grid grid-cols-2 gap-3 border-y border-black/10 py-4 xl:grid-cols-4"><Metric label="Reports" value={signal.report_count} /><Metric label="Contributors" value={signal.unique_contributors} /><Metric label="Mean spread" value={`${signal.mean_distance_km.toFixed(2)} km`} /><Metric label="Trend" value={humanize(signal.trend)} /></div>
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-zinc-500">Last observed {dateTime(signal.last_observed)}</p><Link href={signalHref(signal.id, filters)} className="rounded-lg bg-[#14231a] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#285e4a] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Open evidence page →</Link></div>
+    </article>
+  );
+}
+
+function RankedSignalRow({ signal, filters, rank, selectedCategory = null }: { signal: Hotspot; filters: InsightsFilters; rank: number; selectedCategory?: string | null }) {
+  const relatedToMapSelection = selectedCategory === signal.category;
+  return (
+    <article className={`grid gap-3 rounded-xl border p-4 transition sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center ${relatedToMapSelection ? "border-[#2a4a33] bg-[#f1f6ef] ring-1 ring-[#b8ccb9]" : "border-[#dfe5dd] bg-white hover:border-[#b8ccb9] hover:bg-[#fbfcfa]"}`}>
+      <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-[#eef3ed] text-xs font-bold tabular-nums text-[#2a4a33]">{rank}</span>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2"><h3 className="text-base font-bold text-[#14231a]">{categoryLabel(signal.category)}</h3><span className="rounded-full bg-[#f4f6f3] px-2 py-0.5 text-[10px] font-bold capitalize text-[#55705c]">{signal.trend}</span>{relatedToMapSelection && <span className="rounded-full bg-[#dce8dc] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#2a4a33]">Map selection</span>}</div>
+        <p className="mt-1 truncate text-xs leading-5 text-zinc-600">{signal.report_count} reports · {signal.unique_contributors} contributors · last observed {dateTime(signal.last_observed)}</p>
+      </div>
+      <div className="flex items-center justify-between gap-4 sm:justify-end"><div className="text-left sm:text-right"><p className="text-lg font-bold tabular-nums text-[#14231a]">{signal.persistence_score}</p><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">signal score</p></div><Link href={signalHref(signal.id, filters)} className="rounded-lg border border-[#b8ccb9] px-3 py-2 text-xs font-semibold text-[#2a4a33] transition hover:bg-[#edf5ed] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Inspect →</Link></div>
     </article>
   );
 }
@@ -308,6 +339,7 @@ function AnalyticsPageContent() {
   const narratives = data?.narratives ?? [];
   const lead = narratives[0];
   const categories = data?.summary.by_category ?? [];
+  const criticalReports = data?.summary.by_severity.find((item) => item.severity === "critical")?.count ?? 0;
   const days = useMemo(() => buildReplayDays(filters.window_days, data?.map_points ?? []), [data?.map_points, filters.window_days]);
   const selectedDay = timelineDate ?? days.at(-1)?.date ?? null;
   const visiblePoints = useMemo(() => selectedDay ? (data?.map_points ?? []).filter((point) => !point.created_at || (localDayKey(point.created_at) ?? "") <= selectedDay) : (data?.map_points ?? []), [data?.map_points, selectedDay]);
@@ -373,34 +405,34 @@ function AnalyticsPageContent() {
 
       <FilterBar filters={filters} categories={categories} onChange={updateFilters} onPreset={applyPreset} onClear={clearFilters} onRefresh={() => insights.refetch()} refreshing={insights.isFetching} mapUpdating={mapUpdating} />
 
-      {insights.isLoading ? <div className="grid gap-5 lg:grid-cols-[minmax(0,1.55fr)_360px]"><Skeleton className="h-[600px]" /><Skeleton className="h-[600px]" /></div> : insights.error ? <FeedbackPanel variant="error" title="Insights could not load" description="The operations intelligence service did not return a usable response." action={<button type="button" onClick={() => insights.refetch()} className="rounded-lg bg-[#14231a] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#285e4a] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Retry</button>} /> : <>
-        <section className="grid grid-cols-2 gap-3 sm:grid-cols-4" aria-label="Insight summary">
+      {insights.isLoading ? <div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_360px]"><Skeleton className="h-[600px]" /><Skeleton className="h-[600px]" /></div> : insights.error ? <FeedbackPanel variant="error" title="Insights could not load" description="The operations intelligence service did not return a usable response." action={<button type="button" onClick={() => insights.refetch()} className="rounded-lg bg-[#14231a] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[#285e4a] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Retry</button>} /> : <>
+        <section className="grid gap-3 sm:grid-cols-3" aria-label="Insight summary">
           <Card className="border-[#dfe5dd] p-4"><Metric label="Matching reports" value={data?.summary.total ?? 0} tone="green" /></Card>
           <Card className="border-[#dfe5dd] p-4"><Metric label="Recurring signals" value={data?.signal_count ?? 0} /></Card>
-          <Card className="border-[#dfe5dd] p-4"><Metric label="Visible on map" value={visiblePoints.length} /></Card>
-          <Card className="border-[#dfe5dd] p-4"><Metric label="Window" value={`${filters.window_days} days`} /></Card>
+          <Card className="border-[#dfe5dd] p-4"><Metric label="Critical reports" value={criticalReports} /></Card>
         </section>
 
-        <section className="grid gap-5 lg:grid-cols-[minmax(0,1.55fr)_360px]">
+        <section className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.4fr)_minmax(22rem,0.9fr)]">
           <Card className="overflow-hidden border-[#dfe5dd] p-0">
-            <div className="flex flex-wrap items-end justify-between gap-3 p-5"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#55705c]">Primary investigation</p><h2 className="mt-2 text-2xl font-bold tracking-[-0.03em] text-[#14231a]">Signal map</h2></div><p className="text-xs text-zinc-500">{visiblePoints.length} visible reports · select a cluster or report</p></div>
-            <div className="mx-5 mb-4 rounded-xl border border-[#dfe5dd] bg-[#fbfcfa] px-3.5 py-3 text-xs leading-5 text-zinc-600"><span className="font-bold text-[#14231a]">Next step:</span> select a map marker to connect the report to its related signal and evidence record.</div>
+            <div className="flex flex-wrap items-end justify-between gap-3 p-5"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#55705c]">Primary investigation</p><h2 className="mt-2 text-2xl font-bold tracking-[-0.03em] text-[#14231a]">Evidence map</h2></div><p className="text-xs text-zinc-500">{visiblePoints.length} reports in scope</p></div>
+            <div className="mx-5 mb-4 border-l-2 border-[#b8ccb9] bg-[#f7faf6] px-3.5 py-2.5 text-xs leading-5 text-zinc-600"><span className="font-bold text-[#14231a]">Inspect the evidence:</span> select a cluster or report to connect it with the related signal.</div>
             <InsightsMap points={visiblePoints} fitKey={mapFitKey} selectedId={selectedPointId} onSelect={selectPoint} onBoundsChange={onBoundsChange} height={540} />
             <details className="border-t border-[#e4e9e2] bg-[#fbfcfa]">
-              <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-[#14231a] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-inset lg:px-5">Replay reporting <span className="ml-2 text-xs font-normal text-zinc-500">Inspect how the scope changed by day</span></summary>
+              <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-[#14231a] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-inset lg:px-5">Replay reporting <span className="ml-2 text-xs font-normal text-zinc-500">Review how this scope changed by day</span></summary>
               <InsightsTimeline days={days} value={timelineDate} onChange={setTimelineDate} />
             </details>
+            <div className="grid gap-4 border-t border-[#e4e9e2] px-5 py-4 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end"><div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#55705c]">Map guide</p><p className="mt-1 text-sm leading-6 text-zinc-600">Numbered markers group nearby reports. Zoom in to separate them, then select a report to inspect its evidence.</p></div><div className="grid grid-cols-2 gap-5 border-t border-zinc-100 pt-3 xl:border-t-0 xl:pt-0"><Metric label="Radius" value={`${filters.radius_km} km`} /><Metric label="Scope" value={filters.bounds ? "Map area" : "Citywide"} /></div></div>
           </Card>
-          <aside className="space-y-5">
+          <aside className="min-w-0 space-y-5">
             {lead ? <SignalCard signal={lead} filters={filters} featured selectedCategory={selectedPointCategory} /> : <Card className="flex min-h-[260px] items-center justify-center border-[#dfe5dd] p-8 text-center"><div><p className="text-lg font-bold text-[#14231a]">No recurring signal in this scope</p><p className="mt-2 text-sm leading-6 text-zinc-500">Widen the time window or clear the map area to see more evidence.</p></div></Card>}
-            {selectedPoint && selectedPointCategory ? <SelectedPoint point={selectedPoint} category={selectedPointCategory} relatedSignal={selectedSignal} filters={filters} onFocusCategory={() => updateFilters({ category: selectedPointCategory })} /> : <Card className="border-[#dfe5dd] bg-[#fffdf8] p-5"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#55705c]">How to read this map</p><h3 className="mt-2 text-base font-bold text-[#14231a]">Clusters reveal repetition</h3><p className="mt-2 text-sm leading-6 text-zinc-600">Numbered markers group nearby reports. Zoom in to separate them, then select a report to inspect its evidence record.</p><div className="mt-4 grid grid-cols-2 gap-3 border-t border-zinc-100 pt-4"><Metric label="Radius" value={`${filters.radius_km} km`} /><Metric label="Scope" value={filters.bounds ? "Map area" : "Citywide"} /></div></Card>}
+            {selectedPoint && selectedPointCategory && <SelectedPoint point={selectedPoint} category={selectedPointCategory} relatedSignal={selectedSignal} filters={filters} onFocusCategory={() => updateFilters({ category: selectedPointCategory })} />}
             <SignalDefinitions />
           </aside>
         </section>
 
         <details className="group rounded-2xl border border-[#dfe5dd] bg-white">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 text-sm font-bold text-[#14231a] transition-colors hover:bg-[#f7faf6] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-inset">
-            <span className="flex min-w-0 items-center gap-3"><span aria-hidden className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#b8ccb9] bg-[#f1f6ef] text-[#2a4a33]"><svg viewBox="0 0 16 16" className="h-3.5 w-3.5 transition-transform duration-200 group-open:rotate-180" fill="none" aria-hidden="true"><path d="m4 6 4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></span><span className="min-w-0"><span className="block">Explore supporting patterns</span><span className="mt-0.5 block text-xs font-normal text-zinc-500">Click to review activity, category mix, and severity mix</span></span></span>
+            <span className="flex min-w-0 items-center gap-3"><span aria-hidden className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#b8ccb9] bg-[#f1f6ef] text-[#2a4a33]"><svg viewBox="0 0 16 16" className="h-3.5 w-3.5 transition-transform duration-200 group-open:rotate-180" fill="none" aria-hidden="true"><path d="m4 6 4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></span><span className="min-w-0"><span className="block">Supporting evidence</span><span className="mt-0.5 block text-xs font-normal text-zinc-500">Activity, category mix, and severity mix for the current scope</span></span></span>
             <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.14em] text-[#55705c]"><span className="group-open:hidden">Expand</span><span className="hidden group-open:inline">Collapse</span></span>
           </summary>
           <section className="grid gap-5 border-t border-[#e4e9e2] p-5 lg:grid-cols-[1.25fr_.75fr]">
@@ -409,13 +441,7 @@ function AnalyticsPageContent() {
           </section>
         </details>
 
-        <details className="group rounded-2xl border border-[#dfe5dd] bg-white">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 text-sm font-bold text-[#14231a] transition-colors hover:bg-[#f7faf6] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-inset">
-            <span className="flex min-w-0 items-center gap-3"><span aria-hidden className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#b8ccb9] bg-[#f1f6ef] text-[#2a4a33]"><svg viewBox="0 0 16 16" className="h-3.5 w-3.5 transition-transform duration-200 group-open:rotate-180" fill="none" aria-hidden="true"><path d="m4 6 4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg></span><span className="min-w-0"><span className="block">Explore ranked signals</span><span className="mt-0.5 block text-xs font-normal text-zinc-500">Click to compare {Math.max(0, narratives.length - 1)} additional signals; the priority signal is shown above</span></span></span>
-            <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.14em] text-[#55705c]"><span className="group-open:hidden">Expand</span><span className="hidden group-open:inline">Collapse</span></span>
-          </summary>
-          <section className="border-t border-[#e4e9e2] p-5"><div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#55705c]">Ranked evidence</p><h2 className="mt-2 text-2xl font-bold tracking-[-0.03em] text-[#14231a]">Signals worth understanding</h2></div><p className="text-xs text-zinc-500">Showing top {Math.min(3, narratives.length)} of {data?.signal_count ?? 0}</p></div>{narratives.length ? <div className="grid gap-4 lg:grid-cols-2">{narratives.slice(1).map((signal) => <SignalCard key={signal.id} signal={signal} filters={filters} selectedCategory={selectedPointCategory} />)}</div> : <Card className="border-[#dfe5dd] p-6 text-sm text-zinc-500">No recurring signal matches the current scope.</Card>}</section>
-        </details>
+        {narratives.length > 1 && <section className="rounded-2xl border border-[#dfe5dd] bg-white p-5"><div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#55705c]">Ranked evidence</p><h2 className="mt-2 text-2xl font-bold tracking-[-0.03em] text-[#14231a]">Other signals in this scope</h2><p className="mt-1 text-sm text-zinc-600">Compare the next strongest patterns before opening a full evidence page.</p></div><p className="text-xs text-zinc-500">{Math.max(0, narratives.length - 1)} additional signals</p></div><div className="space-y-3">{narratives.slice(1).map((signal, index) => <RankedSignalRow key={signal.id} signal={signal} filters={filters} rank={index + 2} selectedCategory={selectedPointCategory} />)}</div></section>}
       </>}
     </div>
   );
@@ -423,7 +449,7 @@ function AnalyticsPageContent() {
 
 export default function AnalyticsPage() {
   return (
-    <Suspense fallback={<div className="mx-auto max-w-[1500px] space-y-5"><Skeleton className="h-24" /><div className="grid gap-5 lg:grid-cols-[minmax(0,1.55fr)_360px]"><Skeleton className="h-[600px]" /><Skeleton className="h-[600px]" /></div></div>}>
+    <Suspense fallback={<div className="mx-auto max-w-[1500px] space-y-5"><Skeleton className="h-24" /><div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_360px]"><Skeleton className="h-[600px]" /><Skeleton className="h-[600px]" /></div></div>}>
       <AnalyticsPageContent />
     </Suspense>
   );

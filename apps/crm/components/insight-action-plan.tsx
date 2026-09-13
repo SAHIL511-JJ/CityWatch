@@ -22,8 +22,9 @@ function StepList({ items, compact = false }: { items: string[]; compact?: boole
   );
 }
 
-export function InsightActionPlan({ plan, compact = false }: { plan: InsightActionPlan; compact?: boolean }) {
+export function InsightActionPlan({ plan, compact = false, presentation = "default" }: { plan: InsightActionPlan; compact?: boolean; presentation?: "default" | "stacked" }) {
   const priority = PRIORITY_META[plan.priority] ?? PRIORITY_META.routine;
+  const stacked = !compact && presentation === "stacked";
   return (
     <section className={`rounded-2xl border p-5 ${compact ? "border-[#dfe5dd] bg-[#fbfcfa]" : "border-[#b8ccb9] bg-[#f1f6ef]"}`} aria-label="Recommended response">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -36,18 +37,18 @@ export function InsightActionPlan({ plan, compact = false }: { plan: InsightActi
         </span>
       </div>
       <p className="mt-3 text-sm font-medium leading-6 text-[#2a4a33]">{plan.objective}</p>
-      <div className={`${compact ? "mt-4" : "mt-5 grid gap-5 lg:grid-cols-[1.2fr_.8fr]"}`}>
+      <div className={compact ? "mt-4" : stacked ? "mt-5 space-y-4" : "mt-5 grid gap-5 lg:grid-cols-[1.2fr_.8fr]"}>
         <div>
           <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Start here</p>
           <StepList items={plan.immediate_steps} compact={compact} />
         </div>
         {!compact && (
-          <div className="space-y-4">
-            <div>
+          <div className={stacked ? "grid gap-4 border-t border-black/10 pt-4" : "space-y-4"}>
+            <div className={stacked ? "rounded-xl border border-[#d7e3d5] bg-white/60 px-3.5 py-3" : ""}>
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Route to</p>
               <p className="mt-1 text-sm font-semibold leading-5 text-[#14231a]">{plan.authority}</p>
             </div>
-            <div>
+            <div className={stacked ? "rounded-xl border border-[#d7e3d5] bg-white/60 px-3.5 py-3" : ""}>
               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-zinc-500">Contact authority when</p>
               <ul className="mt-1 space-y-1.5 text-sm leading-5 text-zinc-700">{plan.contact_authority_when.map((item) => <li key={item}>• {item}</li>)}</ul>
             </div>
