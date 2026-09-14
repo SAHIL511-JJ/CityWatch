@@ -18,7 +18,9 @@ services:
         sync: false
       - key: FCM_CRED_JSON
         sync: false
-      - key: AI_API_KEY
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
         sync: false
       - key: STORAGE_BUCKET
         value: incident-photos
@@ -38,7 +40,9 @@ services:
         sync: false
       - key: REDIS_URL
         sync: false
-      - key: AI_API_KEY
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
         sync: false
       - key: CELERY_WORKER_CONCURRENCY
         value: 1
