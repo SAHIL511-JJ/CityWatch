@@ -311,25 +311,40 @@ def _resolution_photo_redirect(photo_url: str | None):
 
 
 def enqueue_analysis(incident_id: str) -> bool:
-    """Queue analysis when Redis is available; report whether it was queued."""
-    try:
-        import socket
-        from urllib.parse import urlparse
-
-        pr = urlparse(settings.REDIS_URL)
-        sock = socket.create_connection(
-            (pr.hostname or "localhost", pr.port or 6379), timeout=1
-        )
-        sock.close()
-    except Exception:
-        return False
+    """Publish analysis once without making the API run Gemini on failure."""
     try:
         from .worker import analyze_incident
 
-        getattr(analyze_incident, "delay")(str(incident_id))
+        analyze_incident.apply_async(args=(str(incident_id),), retry=False)
         return True
-    except Exception:
+    except Exception as exc:
+        print(f"[analysis-queue] publish failed for {incident_id}: {exc}")
         return False
+
+
+def mark_analysis_queue_unavailable(db: Session, inc: Incident) -> None:
+    """Leave a durable, staff-actionable state when Celery cannot accept a job."""
+    old_status = inc.status
+    inc.status = "needs_review"
+    inc.ai_confidence = 0.0
+    inc.ai_analysis = {
+        "is_legitimate": True,
+        "category": "other_environmental_condition",
+        "severity": inc.severity or "medium",
+        "confidence": 0.0,
+        "reason": "AI queue unavailable; staff review required",
+        "analysis_version": "queue-unavailable-v1",
+    }
+    db.add(
+        StatusHistory(
+            incident_id=inc.id,
+            old_status=old_status,
+            new_status=inc.status,
+            changed_by=None,
+        )
+    )
+    db.commit()
+    db.refresh(inc)
 
 
 def seed() -> None:
@@ -497,21 +512,7 @@ def create_incident(
     )
     db.commit()
     if not enqueue_analysis(inc.id):
-        # Redis/Celery is optional. Never leave a citizen's report stuck in
-        # processing just because the background worker is unavailable.
-        from .worker import apply_ai_result, run_ai
-
-        try:
-            result = run_ai(inc.title or "", inc.description or "", inc.photo_url)
-        except Exception:
-            result = {
-                "is_legitimate": True,
-                "category": "other_environmental_condition",
-                "severity": "medium",
-                "confidence": 0.0,
-                "reason": "AI analysis unavailable; manual review required",
-            }
-        apply_ai_result(db, inc, result)
+        mark_analysis_queue_unavailable(db, inc)
     return {"id": str(inc.id), "status": inc.status, "photo_url": photo_url}
 
 

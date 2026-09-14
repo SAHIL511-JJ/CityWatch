@@ -35,7 +35,16 @@ CELERY_REDIS_URL = _celery_redis_url(settings.REDIS_URL)
 celery = Celery(
     "incident_worker", broker=CELERY_REDIS_URL, backend=CELERY_REDIS_URL
 )
-celery.conf.update(task_acks_late=True, worker_prefetch_multiplier=1)
+celery.conf.update(
+    task_acks_late=True,
+    worker_prefetch_multiplier=1,
+    task_publish_retry=False,
+    broker_transport_options={
+        "socket_connect_timeout": 1,
+        "socket_timeout": 1,
+        "retry_on_timeout": False,
+    },
+)
 
 ANALYSIS_VERSION = "environmental-v1"
 _CATEGORY_KEYS = "|".join(ENVIRONMENTAL_CATEGORIES)
@@ -281,6 +290,8 @@ def analyze_incident(self, incident_id: str) -> dict:
         inc = db.get(Incident, incident_id)
         if inc is None:
             return {"ok": False, "error": "not found"}
+        if inc.status != "processing":
+            return {"ok": True, "status": inc.status, "skipped": True}
         res = run_ai(inc.title or "", inc.description or "", inc.photo_url)
         status = apply_ai_result(db, inc, res)
         # nearby push stub: users within 10km whose threshold allows it
