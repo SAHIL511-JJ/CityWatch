@@ -8,6 +8,7 @@ Runs on Render worker service with Upstash Redis as broker.
 import base64
 import json
 import os
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from celery import Celery
 
@@ -15,8 +16,24 @@ from .config import settings
 from .incident_status import can_ai_transition
 from .taxonomy import ENVIRONMENTAL_CATEGORIES, canonical_category
 
+
+def _celery_redis_url(redis_url: str) -> str:
+    """Add Celery's required certificate policy to secure Redis URLs."""
+
+    parsed = urlsplit(redis_url)
+    if parsed.scheme != "rediss":
+        return redis_url
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query.setdefault("ssl_cert_reqs", "required")
+    return urlunsplit(
+        (parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment)
+    )
+
+
+CELERY_REDIS_URL = _celery_redis_url(settings.REDIS_URL)
+
 celery = Celery(
-    "incident_worker", broker=settings.REDIS_URL, backend=settings.REDIS_URL
+    "incident_worker", broker=CELERY_REDIS_URL, backend=CELERY_REDIS_URL
 )
 celery.conf.update(task_acks_late=True, worker_prefetch_multiplier=1)
 
