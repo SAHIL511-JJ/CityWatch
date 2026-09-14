@@ -22,12 +22,13 @@ services:
         sync: false
       - key: STORAGE_BUCKET
         value: incident-photos
-  - type: worker
+  - type: web
     name: incident-worker
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: celery -A app.worker.celery worker --loglevel=info --concurrency=2
+    startCommand: uvicorn app.worker_service:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
     envVars:
       - key: SUPABASE_URL
         sync: false
@@ -39,3 +40,5 @@ services:
         sync: false
       - key: AI_API_KEY
         sync: false
+      - key: CELERY_WORKER_CONCURRENCY
+        value: 1
