@@ -22,7 +22,7 @@ The desired loading surfaces already exist and must be preserved:
 - `apps/crm/app/incidents/page.tsx::QueuePageSkeleton` / `SkeletonRows`, `app/users/page.tsx`, `app/staff/page.tsx`, `app/analytics/page.tsx`, `app/analytics/[signalId]/page.tsx`, and `app/page.tsx` already own initial-data skeletons or labelled loading states.
 - Existing React Query behaviour deliberately retains previous rows for incident and Insights scope changes using `placeholderData: keepPreviousData`; those are in-page refreshes, not full-page navigation, and correctly show “Updating …”.
 
-`NavigationLink` is used by the sidebar and CRM page links. `components/sidebar.tsx::Shell` and `app/login/page.tsx` also call `useNavigationFeedback()` before imperative `router.push("/login")` and `router.push("/")` respectively. The focused test file is `apps/crm/tests/navigation-feedback.spec.ts`.
+`NavigationLink` is used by the sidebar and CRM page links. `components/sidebar.tsx::Shell` and `app/login/page.tsx` also call `useNavigationFeedback()` before imperative `router.push("/login")` and `router.push("/")` respectively. Verification is an interactive headed Playwright CLI walk through the real CRM; the repository does not retain automated browser test scripts.
 
 ## 3. Scope
 
@@ -79,7 +79,6 @@ None. The requested outcome supports the minimal design above.
 | `apps/crm/components/ui/navigation-link.tsx` | `NavigationLink` | Preserve caller compatibility without pending UI | Simplify to a transparent, typed wrapper around `next/link`; remove feedback imports, click interception, `aria-busy`, and spinner markup. |
 | `apps/crm/components/sidebar.tsx` | `Shell`, `signOut` | Remove imperative feedback dependency | Remove `useNavigationFeedback`/`beginNavigation`; keep `router.push("/login")` and all existing `NavigationLink` uses. |
 | `apps/crm/app/login/page.tsx` | login submit success path | Remove imperative feedback dependency | Remove `useNavigationFeedback`/`beginNavigation`; after successful token storage retain the existing `router.push("/")` flow. |
-| `apps/crm/tests/navigation-feedback.spec.ts` | route-feedback cases | Regression proof for requested UX | Replace tests that assert top feedback or its modifier-click suppression with a click-driven delayed-detail skeleton test. Retain/reuse realistic mocked shared reads. |
 | `apps/crm/app/loading.tsx` | `Loading` | Existing fallback, inspected | No code change planned. Do not duplicate the shell or turn it into a global overlay. |
 | `apps/crm/app/incidents/[id]/page.tsx` | `IncidentDetailSkeleton` | Existing target skeleton, inspected | No code change planned unless the regression test exposes a real blank-state defect. |
 | `apps/crm/app/incidents/page.tsx`, `app/analytics/page.tsx` | `keepPreviousData` / updating UI | Existing in-page refresh semantics, inspected | No code change planned; these must remain untouched by the route-feedback removal. |
@@ -107,17 +106,9 @@ None. The requested outcome supports the minimal design above.
    - **Edge cases:** Do not replace `router.push` with a full browser reload; Next.js client navigation is required for the existing shell and destination loading behaviour.
    - **Verification:** `rg -n "useNavigationFeedback|beginNavigation|NavigationFeedbackProvider|navigation-feedback" apps/crm` returns no source imports or usages (apart from deliberately removed-file references in generated artefacts, which must not be committed).
 
-4. **Prove destination-first loading through an interaction test.**
-   - **Location:** `apps/crm/tests/navigation-feedback.spec.ts`.
-   - **Change:** Keep the realistic staff session/shared API mocks. Create an incidents-list response containing `incident-1`, delay `GET /admin/incidents/incident-1` with a promise gate, then:
-     1. visit `/incidents` and wait for the `Blocked drain` link;
-     2. click that link (do not use `page.goto` for the destination);
-     3. assert the URL reaches `/incidents/incident-1` and `getByLabel("Loading incident details")` is visible before releasing the response;
-     4. assert no element contains the prior “Opening Incident detail…” route status or top progress UI;
-     5. release the request and assert `Blocked drain` is visible as detail content.
-   - **Contract:** The test must validate user-visible accessibility output, not implementation class names or React context internals. It must not rely on a fixed sleep.
-   - **Edge cases:** Ensure the delayed detail route is registered before clicking. Preserve any test that covers meaningful data-loading behaviour; remove only the obsolete assertion that modified clicks avoid the global indicator.
-   - **Verification:** The focused Playwright command in section 8 passes reliably with the request held and released.
+4. **Prove destination-first loading through an interactive CLI walk.**
+   - **Procedure:** In the headed Playwright CLI against the real CRM, open Incidents, click a real incident, and observe that the URL changes immediately. Under a naturally slow response, confirm the detail skeleton is page-owned, no `Opening …` overlay appears, and real content replaces the skeleton after the response.
+   - **Contract:** Judge user-visible behavior, not implementation class names. Do not add an automated browser script for this flow.
 
 5. **Run the regression guard and visually confirm no blank route state.**
    - **Location:** no source change.
@@ -136,9 +127,8 @@ All checks below are **to run** during implementation; none have been run while 
 |---|---|---|
 | **Must run** | `Set-Location C:\incident_reporter\apps\crm; npm.cmd run lint` | No new lint errors. |
 | **Must run** | `Set-Location C:\incident_reporter\apps\crm; npm.cmd run build` | Next.js builds after provider and component deletion. |
-| **Must run** | `Set-Location C:\incident_reporter\apps\crm; npx playwright test tests/navigation-feedback.spec.ts` | The delayed click displays the detail skeleton and never displays “Opening …”. |
+| **Must run** | Interactive headed Playwright CLI: click a real incident from Incidents. | The URL changes immediately; a slow detail request shows the destination skeleton and never shows “Opening …”. |
 | **Recommended** | `rg -n "Opening |navigation-progress|useNavigationFeedback|beginNavigation|NavigationFeedbackProvider" apps/crm/app apps/crm/components` | No custom global route-feedback implementation remains. |
-| **Recommended** | `Set-Location C:\incident_reporter\apps\crm; npx playwright test` | Existing CRM UI tests remain compatible with transparent `NavigationLink` behaviour. |
 
 ### Integration and database checks
 

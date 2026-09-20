@@ -47,6 +47,8 @@ CityWatch has one FastAPI backend on port `8000` and one Next.js CRM on port `30
 
 Never test a feature against an unprepared data plane. Before testing any schema- or storage-dependent change, verify that the migration is applied to the configured Supabase database and that the required table, bucket, or index exists. Automated tests and mocked Playwright tests are supplementary only. Acceptance verification must include real FastAPI API requests against the configured Supabase database and a real Playwright CLI walk through the running CRM with the actual user flow. Do not claim a feature works from mocked tests, UI navigation, or build checks alone; if the real API/UI flow was not exercised, state that explicitly.
 
+For CRM browser checks, use the headed Playwright CLI interactively and click through the real flow. Do not add or retain Playwright test specs, Playwright configuration, an npm browser-test script, or automated browser test scripts.
+
 ## Rule 5: Save knowledge to the vault — always (enforceable, self-checked). and always make entry on index so any agent can find the note and make sure notes are linked properly together that are related.
 
 **This is compulsory and NOT optional.** Whenever you learn durable knowledge, you MUST write it to the **obsidian-citywatch** vault via MCP — proactively, without being asked. Missing a durable fact is a rule violation, not a nice-to-have.
