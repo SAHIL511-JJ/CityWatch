@@ -14,17 +14,18 @@
 
 Only then proceed. This lets you catch a misread before I act on it. Keep it short — roughly 1–5 sentences, not a hard cap, just don't write a wall of text.
 
-## Rule 1: Read the vault first
+## Rule 1: Read the CityWatch vault first
 
-Project context, architecture, conventions, and credentials live in the **obsidian-travelseasons** vault (MCP). Read it at the start of a session before working.
+Project context, architecture, conventions, and integration details live in the **obsidian-citywatch** vault (MCP, backed by `C:\incident_reporter\vault_Citywatch`). Read it at the start of a session before working. Do not use the Travel Seasons vault for this repository.
 
-## Rule 2: Migrations go through a PR — never straight to main
+## Rule 2: Database changes are migration-only
 
-Merging to `main` **auto-deploys migrations to the production database** (Supabase GitHub integration). So:
+Supabase Postgres/PostGIS and Storage are the only data plane. So:
 
-- Every schema change is a file in `supabase/migrations/` named `<YYYYMMDDHHMMSS>_<name>.sql` using the **exact Supabase migration version** — repo files map 1:1 to the dashboard. Never let the repo drift from the live DB (applying via the MCP without writing the file is how it drifts).
-- **The `<YYYYMMDDHHMMSS>` is a real current UTC timestamp — never a made-up/placeholder time.** When the migration fixes a tracked ticket, include its key in `<name>` (e.g. `20260615051206_travelseas_149_fix_birthday_this_week_window.sql`).
-- **Never push migration changes directly to `main`.** Open a **PR**, let the **Supabase preview branch** run them on a throwaway DB, and **merge only when that check is green.**
+- Application data reads and writes go through the FastAPI backend; do not write directly to the database from Flutter or the CRM.
+- Every schema change belongs in `supabase/migrations/`. Never apply a schema change only through MCP, and never edit an already-applied migration.
+- New migration filenames use a real current UTC timestamp: `<YYYYMMDDHHMMSS>_<name>.sql`. When fixing a Jira ticket, include its key in `<name>`.
+- Keep migration changes reviewable and do not push them directly to `main`; use the repository's branch/PR workflow.
 
 ## Rule 2.5: One worktree, only when told, closed out after merge
 
@@ -34,19 +35,21 @@ When told to start one:
 - Make exactly **one** worktree, right then — not a new one per ticket/issue that comes up later in the same session.
 - Do all of that session's work in that same worktree. Don't spin up additional ones.
 - Track which worktree is the active one — don't lose it.
-- Never merge it into `dev` until Sahil explicitly says so.
+- Never merge it until Sahil explicitly says so.
 - Once it's merged, remove that worktree (and its branch) so it doesn't linger — clean up the one you just finished, not anything else.
 
 
-## Rule 4: Exactly ONE process per backend — never `--reload`
+## Rule 4: Exactly one backend process — never `--reload`
 
-**One process per server (TS API :8000, Reelcraft :8001), no exceptions.** Never run uvicorn with `--reload` on this machine — on Windows it spawns a hidden worker that survives kills and keeps serving stale code. Before starting a server: kill the old one, verify **zero** leftover `spawn_main` pythons and **exactly one** listener on the port. After backend edits, restart manually.
+CityWatch has one FastAPI backend on port `8000` and one Next.js CRM on port `3000`. Never run uvicorn with `--reload` on this machine; on Windows it can leave a hidden worker serving stale code. Before starting the backend, kill the old process, verify zero leftover `spawn_main` Python processes and exactly one listener on port `8000`, then launch from `apps/backend` using the repository's configured Python environment. After backend edits, restart manually. Do not start duplicate CRM or backend processes.
 
-**ALWAYS launch the TS API from its `.venv`, NEVER plain global `python`.** Start it with `apps\api\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000` (CWD = `apps/api`). The global Python311 has drifted **stale** (FastAPI 0.116.1) vs the venv/lockfile & every deploy (FastAPI 0.136.3) — running on global causes **version-sensitive bugs that don't repro on deployed** (this is exactly what silently 422'd 8 cached endpoints and blanked the Leads board). The venv `python.exe` re-execs the base interpreter, so its Windows CommandLine/ExecutablePath *show the global path* even when correct — verify the interpreter with `.venv\Scripts\python.exe -c "import fastapi;print(fastapi.__version__)"` (must be 0.136.3), not by the process path.
+## Rule 4.5: Migration-first, real-world verification
+
+Never test a feature against an unprepared data plane. Before testing any schema- or storage-dependent change, verify that the migration is applied to the configured Supabase database and that the required table, bucket, or index exists. Automated tests and mocked Playwright tests are supplementary only. Acceptance verification must include real FastAPI API requests against the configured Supabase database and a real Playwright CLI walk through the running CRM with the actual user flow. Do not claim a feature works from mocked tests, UI navigation, or build checks alone; if the real API/UI flow was not exercised, state that explicitly.
 
 ## Rule 5: Save knowledge to the vault — always (enforceable, self-checked). and always make entry on index so any agent can find the note and make sure notes are linked properly together that are related.
 
-**This is compulsory and NOT optional.** Whenever you learn durable knowledge, you MUST write it to the **obsidian-travelseasons** vault via MCP — proactively, without being asked. Missing a durable fact is a rule violation, not a nice-to-have.
+**This is compulsory and NOT optional.** Whenever you learn durable knowledge, you MUST write it to the **obsidian-citywatch** vault via MCP — proactively, without being asked. Missing a durable fact is a rule violation, not a nice-to-have.
 
 **A durable fact = anything still true next week that a fresh session would otherwise have to re-discover.** If you say, test, confirm, or correct any of the following, that is a **WRITE TRIGGER** — stop and record it before you move on:
 - **Architecture / infra reality** — how envs, services, DBs, deploys actually wire up (e.g. "dev/prod/local share ONE DB, no isolation").
@@ -61,7 +64,9 @@ When told to start one:
 3. **Fix wrong notes, don't just append.** If a vault note conflicts with reality, CORRECT it and tell Sahil you did — stale notes cause real accidents.
 4. **One fact, findable.** Put it in the most relevant existing note (or a clearly-named new one); make the title / first line searchable.
 
-**Never** store statuses / progress / changelogs / TODOs / "what I did today" — those go to git & Plane. The vault holds durable truth only.
+**Never** store statuses / progress / changelogs / TODOs / "what I did today" — those go to git & Jira. The vault holds durable truth only.
+
+CityWatch Jira tickets live in the `KAN` project. Use the connected official Atlassian/Rovo MCP for ticket lookup and updates; never copy OAuth tokens into the repository.
 
 ## Rule 6: Default to medium-length replies
 

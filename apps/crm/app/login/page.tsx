@@ -6,14 +6,12 @@ import { apiFetch, setToken } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { useNavigationFeedback } from "@/components/ui/navigation-feedback";
 
 const FONT = { fontFamily: "Verdana, Geneva, sans-serif" } as const;
 const SHOW_DEV_HINT = process.env.NODE_ENV !== "production";
 
 export default function LoginPage() {
   const router = useRouter();
-  const { beginNavigation } = useNavigationFeedback();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
@@ -42,7 +40,6 @@ export default function LoginPage() {
         body: JSON.stringify({ email: email.trim(), password }),
       });
       setToken(data.token);
-      beginNavigation("/");
       router.push("/");
     } catch (err) {
       fail(err instanceof Error ? err.message : "Login failed");

@@ -49,12 +49,14 @@ Get a key at `aistudio.google.com` → Get API key (no card). Set `GEMINI_API_KE
 All API, CRM, and Flutter filters use the same machine values: `flooding`, `waterlogging`, `blocked_drain`, `waste`, `sewage`, `plastic`, `pollution`, `damaged_infrastructure`, and `other_environmental_condition`. Historical generic values remain readable and are mapped to the last category when returned.
 
 ## API cheatsheet
-`POST /auth/anonymous, POST /auth/send-code, POST /auth/verify, POST /incidents (multipart), GET /incidents?lat&lng&radius_km&category, GET /incidents/{id}, POST /admin/login, GET/PATCH /admin/incidents, POST /admin/incidents/{id}/notes, GET /admin/users, GET /admin/analytics/summary, GET /admin/analytics/hotspots`
+`POST /auth/anonymous, POST /auth/send-code, POST /auth/verify, POST /incidents (multipart), GET /incidents?lat&lng&radius_km&category, GET /hotspots?lat&lng&radius_km&window_days&category&severity&trend, GET /incidents/{id}, POST /admin/login, GET/PATCH /admin/incidents, POST /admin/incidents/{id}/notes, GET /admin/users, GET /admin/analytics/summary, GET /admin/analytics/hotspots?radius_km&window_days&lat&lng&category&severity&trend`
 
 ## Docs
 - `incident_reporting_platform_plan.md` — full product + tech plan
 - `EXECUTION_PLAN.md` — worktree contract + merge notes
 - `supabase/BUCKET.md` — bucket setup
+- `docs/HOTSPOT_API.md` — public and staff hotspot contracts, filters, examples, and edge cases
+- `docs/CITIWATCH_DEMO.md` — opt-in shared-Supabase KAN-38 demo fixture and API/Flutter/CRM verification runbook
 
 ## Notes
 - App/CRM never touch Supabase directly — only the backend uses the service key.

@@ -30,9 +30,10 @@ async function mockSharedAdminReads(page: Page) {
   await page.route(/\/admin\/incidents\?status=needs_review$/, (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [], total: 0, page: 1, page_size: 1, total_pages: 0 }) }));
 }
 
-test("incident detail shows a structural loading state before data arrives", async ({ page }) => {
+test("clicking an incident leads to the destination skeleton before its data", async ({ page }) => {
   await seedStaffSession(page);
   await mockSharedAdminReads(page);
+  await page.route(/\/admin\/incidents(?:\?.*)?$/, (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [incident], total: 1, page: 1, page_size: 25, total_pages: 1 }) }));
   let release!: () => void;
   const delayed = new Promise<void>((resolve) => { release = resolve; });
   await page.route("**/admin/incidents/incident-1", async (route) => {
@@ -40,9 +41,23 @@ test("incident detail shows a structural loading state before data arrives", asy
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(incident) });
   });
 
-  await page.goto("/incidents/incident-1");
+  await page.goto("/incidents");
+  const incidentLink = page.getByRole("link", { name: "Blocked drain" });
+  await expect(incidentLink).toBeVisible();
+  await incidentLink.click();
+
+  // The URL commits to the destination, which owns its own loading UI.
+  await expect(page).toHaveURL(/\/incidents\/incident-1$/);
   await expect(page.getByLabel("Loading incident details")).toBeVisible();
+
+  // No custom global route feedback: the fixed top "Opening …" status pill and
+  // progress bar are gone. Assert on the user-visible "Opening …" text, not on
+  // role="status" (which the app legitimately reuses for toast notifications).
+  await expect(page.getByText(/Opening /)).toHaveCount(0);
+  await expect(page.locator(".fixed.top-0[role='status']")).toHaveCount(0);
+
   release();
+  await expect(page.getByLabel("Loading incident details")).toBeHidden();
   await expect(page.getByText("Blocked drain").first()).toBeVisible();
 });
 
@@ -66,15 +81,4 @@ test("incident scope refresh keeps rows visible and announces the update", async
   release();
   await filteredResponse;
   await expect(page.getByText("No incidents match this scope")).toBeVisible();
-});
-
-test("modified clicks preserve native navigation without starting route feedback", async ({ page }) => {
-  await seedStaffSession(page);
-  await mockSharedAdminReads(page);
-  await page.route(/\/admin\/incidents(?:\?.*)?$/, (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [], total: 0, page: 1, page_size: 25, total_pages: 0 }) }));
-  await page.goto("/incidents");
-  const dashboard = page.getByRole("link", { name: "Dashboard" });
-  await dashboard.click({ modifiers: ["Control"] });
-  await expect(page).toHaveURL(/\/incidents$/);
-  await expect(page.getByRole("status")).not.toBeVisible();
 });

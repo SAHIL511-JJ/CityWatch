@@ -3,7 +3,7 @@
 
 [mcp_servers.obsidian_citywatch]
 command = "npx"
-args = ["-y", "@mauricio.wolff/mcp-obsidian@latest", "vault_Citywatch"]
+args = ["-y", "@mauricio.wolff/mcp-obsidian@latest", "C:\\incident_reporter\\vault_Citywatch"]
 cwd = ".."
 enabled = true
 default_tools_approval_mode = "writes"

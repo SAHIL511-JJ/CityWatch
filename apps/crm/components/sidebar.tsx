@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch, clearToken, getToken } from "@/lib/api";
 import { NavigationLink } from "@/components/ui/navigation-link";
-import { useNavigationFeedback } from "@/components/ui/navigation-feedback";
 
 type Item = { href: string; label: string; badge?: number; icon: React.ReactNode };
 
@@ -36,7 +35,6 @@ const TITLES: Record<string, string> = {
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { beginNavigation } = useNavigationFeedback();
   const [userMenu, setUserMenu] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -150,7 +148,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   const signOut = () => {
     clearToken();
-    beginNavigation("/login");
     router.push("/login");
   };
 

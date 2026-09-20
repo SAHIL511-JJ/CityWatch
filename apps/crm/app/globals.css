@@ -32,12 +32,6 @@ body {
   50% { opacity: 0.95; transform: scale(1.08); }
 }
 
-@keyframes navigation-progress {
-  0% { transform: translateX(-120%); }
-  50% { transform: translateX(180%); }
-  100% { transform: translateX(420%); }
-}
-
 .leaflet-marker-icon.citywatch-cluster-icon:hover span {
   animation: citywatch-pulse 1.2s ease-in-out infinite;
 }

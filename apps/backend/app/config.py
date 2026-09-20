@@ -7,6 +7,9 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "incident-reporter-api"
     ENV: str = "dev"
+    # Disabled by default. The API-only KAN-38 demo fixture writes marked
+    # records to the one shared Supabase database only when this is enabled.
+    ENABLE_DEMO_FIXTURES: bool = False
 
     # Supabase (DB + Storage only; no Auth/Functions/Realtime/RLS)
     SUPABASE_URL: str = ""

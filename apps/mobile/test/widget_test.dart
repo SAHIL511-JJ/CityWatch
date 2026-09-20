@@ -6,7 +6,9 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:incident_reporter/api_client.dart';
+import 'package:incident_reporter/cw_theme.dart';
 import 'package:incident_reporter/main.dart';
+import 'package:incident_reporter/screens/hotspot_detail_screen.dart';
 
 class _PreviewApi extends ApiClient {
   _PreviewApi() : super(Dio());
@@ -34,7 +36,70 @@ class _PreviewApi extends ApiClient {
       ];
 
   @override
+  Future<List<HotspotItem>> fetchHotspots({
+    required double lat,
+    required double lng,
+    double radiusKm = 10,
+    int windowDays = 30,
+    String? category,
+    String? severity,
+    String? trend,
+    int limit = 6,
+  }) async =>
+      [
+        HotspotItem(
+          id: 'flooding:18.51960:73.85540',
+          category: 'flooding',
+          centroidLat: 18.5196,
+          centroidLng: 73.8554,
+          reportCount: 4,
+          uniqueContributors: 3,
+          firstObserved: DateTime.now()
+              .subtract(const Duration(days: 3))
+              .toIso8601String(),
+          lastObserved: DateTime.now().toIso8601String(),
+          severitySummary: const {'high': 2, 'medium': 2},
+          latestStatus: 'verified',
+          persistenceScore: 78,
+          trend: 'rising',
+          meanDistanceKm: 0.18,
+          reportIds: const ['preview'],
+          explanation:
+              '4 flooding observations from 3 contributor(s) across 3.0 days; mean spread 0.18 km; average confidence 91%.',
+        ),
+      ];
+
+  @override
+  Future<Map<String, dynamic>> fetchIncident(String id) async => {
+        'id': 'preview',
+        'title': 'Broken streetlight on Park Road',
+        'description':
+            'The footpath is dark near the park entrance. Please take care after sunset.',
+        'lat': 18.5196,
+        'lng': 73.8554,
+        'address': 'Park Road, near the north entrance',
+        'status': 'verified',
+        'severity': 'medium',
+        'created_at': DateTime.now().toIso8601String(),
+      };
+
+  @override
   Future<List<int>?> fetchPhotoBytes(String id) async => null;
+}
+
+class _EmptyHotspotApi extends _PreviewApi {
+  @override
+  Future<List<HotspotItem>> fetchHotspots({
+    required double lat,
+    required double lng,
+    double radiusKm = 10,
+    int windowDays = 30,
+    String? category,
+    String? severity,
+    String? trend,
+    int limit = 6,
+  }) async =>
+      [];
 }
 
 void main() {
@@ -65,7 +130,9 @@ void main() {
   });
 
   Future<void> boot(WidgetTester tester,
-      {Size size = const Size(390, 844), double scale = 1}) async {
+      {Size size = const Size(390, 844),
+      double scale = 1,
+      ApiClient? api}) async {
     tester.view.physicalSize = size;
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -73,7 +140,7 @@ void main() {
     tester.platformDispatcher.textScaleFactorTestValue = scale;
     addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
     await tester.pumpWidget(ProviderScope(
-      overrides: [apiClientProvider.overrideWithValue(_PreviewApi())],
+      overrides: [apiClientProvider.overrideWithValue(api ?? _PreviewApi())],
       child: const IncidentReporterApp(),
     ));
     await tester.pumpAndSettle();
@@ -83,8 +150,10 @@ void main() {
       (tester) async {
     await boot(tester);
     expect(find.text('Around your\nneighborhood.'), findsOneWidget);
+    expect(find.text('Recurring near you'), findsOneWidget);
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -500));
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Broken streetlight on Park Road'));
     await tester.tap(find.text('Broken streetlight on Park Road'));
     await tester.pumpAndSettle();
     expect(find.text('Neighborhood report'), findsOneWidget);
@@ -92,6 +161,40 @@ void main() {
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
     expect(find.byType(NavigationBar), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Hotspot detail shows the signal and a public report',
+      (tester) async {
+    final hotspot = (await _PreviewApi().fetchHotspots(lat: 0, lng: 0)).first;
+    await tester.pumpWidget(ProviderScope(
+      overrides: [apiClientProvider.overrideWithValue(_PreviewApi())],
+      child: MaterialApp(
+        theme: cityWatchTheme(),
+        home: HotspotDetailScreen(hotspot: hotspot),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Signal details'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Related observations'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Related observations'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Broken streetlight on Park Road'),
+      500,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Broken streetlight on Park Road'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Feed shows a calm empty state when no hotspot exists',
+      (tester) async {
+    await boot(tester, api: _EmptyHotspotApi());
+    expect(find.text('No recurring signals yet'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

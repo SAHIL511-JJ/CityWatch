@@ -2,12 +2,17 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
 
+from fastapi.testclient import TestClient
+
+from app.auth import get_current_staff, get_current_user
 from app.hotspots import _candidate_rows, detect_hotspots
 from app.insights import build_insights
 from app.action_playbooks import build_action_plan
+from app.main import app, get_db, public_incident_out
 from app.models import Incident
 from app.taxonomy import ENVIRONMENTAL_CATEGORIES, canonical_category
 from app.worker import fake_ai, sanitize_ai_result
+from app.demo_fixtures import DEMO_MARKER, EVIDENCE_PAGES, FIXTURES, PHOTO_SOURCES
 
 
 def _incident(
@@ -93,6 +98,16 @@ class EnvironmentalIntelligenceTests(unittest.TestCase):
             "waterlogging",
         )
 
+    def test_kan_38_fixture_catalog_proves_the_demo_story(self):
+        self.assertEqual(DEMO_MARKER, "[CW-DEMO:KAN-38]")
+        self.assertEqual(len(FIXTURES), 9)
+        self.assertEqual(sum(report.category == "flooding" for report in FIXTURES), 3)
+        self.assertEqual(sum(report.category == "waste" for report in FIXTURES), 4)
+        self.assertEqual(sum(report.category == "damaged_infrastructure" for report in FIXTURES), 1)
+        self.assertEqual(sum(report.status == "resolved" for report in FIXTURES), 1)
+        self.assertTrue(all(url.startswith("https://images.pexels.com/") for url in PHOTO_SOURCES.values()))
+        self.assertTrue(all(url.startswith("https://www.pexels.com/") for url in EVIDENCE_PAGES.values()))
+
     def test_malformed_model_fields_are_safe_and_need_review(self):
         result = sanitize_ai_result({"category": "unknown", "severity": "impossible", "confidence": "nope"})
         self.assertEqual(result["category"], "other_environmental_condition")
@@ -131,6 +146,45 @@ class EnvironmentalIntelligenceTests(unittest.TestCase):
             result = detect_hotspots(object(), radius_km=0.75, window_days=30)
         self.assertEqual(len(result), 3)
 
+    def test_hotspot_filters_apply_time_category_severity_and_trend(self):
+        now = datetime.now()
+        rows = [
+            _incident(category="flooding", lat=18.5200, lng=73.8550, created_at=now - timedelta(days=2), reporter_id="a", severity="high"),
+            _incident(category="flooding", lat=18.5202, lng=73.8551, created_at=now - timedelta(days=1), reporter_id="b", severity="high"),
+            _incident(category="waste", lat=18.5201, lng=73.8551, created_at=now - timedelta(days=1), reporter_id="c", severity="low"),
+            _incident(category="flooding", lat=18.5201, lng=73.8551, created_at=now - timedelta(days=45), reporter_id="old", severity="high"),
+        ]
+        with patch("app.hotspots._candidate_rows", return_value=rows):
+            result = detect_hotspots(
+                object(),
+                radius_km=0.75,
+                window_days=30,
+                category="flooding",
+                severity="high",
+                trend="stable",
+            )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["report_count"], 2)
+        self.assertEqual(result[0]["category"], "flooding")
+        self.assertEqual(result[0]["trend"], "stable")
+
+    def test_empty_hotspot_result_is_stable(self):
+        with patch("app.hotspots._candidate_rows", return_value=[]):
+            self.assertEqual(detect_hotspots(object(), radius_km=0.75), [])
+
+    def test_public_incident_output_excludes_private_identity_and_assignment(self):
+        incident = _incident(
+            category="flooding",
+            lat=18.52,
+            lng=73.85,
+            created_at=datetime.now(),
+            reporter_id="private-reporter",
+        )
+        incident.assigned_to = "private-staff"
+        output = public_incident_out(incident)
+        self.assertNotIn("reporter_id", output)
+        self.assertNotIn("assigned_to", output)
+
     def test_insights_snapshot_returns_ranked_narratives_and_filtered_points(self):
         base = datetime(2026, 9, 1, 8, 0, 0)
         rows = [
@@ -161,7 +215,7 @@ class EnvironmentalIntelligenceTests(unittest.TestCase):
                 "trend": "stable",
             })
             self.assertEqual(len(category_plan["immediate_steps"]), 3)
-            self.assertEqual(len(category_plan["escalate_when"]), 2)
+            self.assertEqual(len(category_plan["contact_authority_when"]), 2)
             self.assertTrue(category_plan["objective"])
             self.assertTrue(category_plan["verify"])
 
@@ -191,6 +245,96 @@ class EnvironmentalIntelligenceTests(unittest.TestCase):
             "trend": "isolated",
         })
         self.assertEqual(fallback["authority"], "Local environmental response team")
+
+
+class HotspotEndpointContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._startup = list(app.router.on_startup)
+        app.router.on_startup.clear()
+
+    @classmethod
+    def tearDownClass(cls):
+        app.router.on_startup[:] = cls._startup
+        app.dependency_overrides.clear()
+
+    def setUp(self):
+        app.dependency_overrides[get_db] = lambda: object()
+        app.dependency_overrides[get_current_user] = lambda: object()
+        app.dependency_overrides[get_current_staff] = lambda: object()
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+
+    @staticmethod
+    def _hotspot_payload():
+        return {
+            "id": "flooding:18.52040:73.85520",
+            "category": "flooding",
+            "centroid": {"lat": 18.5204, "lng": 73.8552},
+            "report_count": 2,
+            "unique_contributors": 2,
+            "first_observed": "2026-09-01T08:00:00+00:00",
+            "last_observed": "2026-09-08T08:00:00+00:00",
+            "severity_summary": {"high": 2},
+            "latest_status": "verified",
+            "persistence_score": 72,
+            "trend": "rising",
+            "mean_distance_km": 0.12,
+            "report_ids": ["incident-1", "incident-2"],
+            "explanation": "2 flooding observations from 2 contributor(s) across 7.0 days; mean spread 0.12 km; average confidence 90%.",
+        }
+
+    def test_public_hotspots_require_authentication(self):
+        app.dependency_overrides.pop(get_current_user)
+        response = self.client.get("/hotspots?lat=18.52&lng=73.85")
+        self.assertEqual(response.status_code, 401)
+
+    def test_demo_fixture_endpoint_is_disabled_without_explicit_runtime_opt_in(self):
+        response = self.client.post("/admin/demo-fixtures/citiwatch")
+        self.assertEqual(response.status_code, 404)
+
+    def test_public_hotspots_strip_staff_metadata(self):
+        payload = self._hotspot_payload()
+        payload.update(
+            {
+                "related_incident_ids": ["incident-1", "incident-2"],
+                "assignment_status": {"assigned": 1, "unassigned": 1, "by_incident": []},
+                "evidence_counts": {"reports": 2, "photos": 2, "notes": 1},
+            }
+        )
+        with patch("app.hotspots.detect_hotspots", return_value=[payload]):
+            response = self.client.get("/hotspots?lat=18.52&lng=73.85")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("assignment_status", response.json()[0])
+        self.assertNotIn("evidence_counts", response.json()[0])
+        self.assertEqual(response.json()[0]["report_ids"], ["incident-1", "incident-2"])
+
+    def test_staff_hotspots_reject_partial_location_and_return_operational_fields(self):
+        response = self.client.get("/admin/analytics/hotspots?lat=18.52")
+        self.assertEqual(response.status_code, 422)
+
+        payload = self._hotspot_payload()
+        payload.update(
+            {
+                "related_incident_ids": ["incident-1", "incident-2"],
+                "assignment_status": {
+                    "assigned": 1,
+                    "unassigned": 1,
+                    "by_incident": [
+                        {"incident_id": "incident-1", "assigned_to": "staff-1", "status": "assigned"},
+                        {"incident_id": "incident-2", "assigned_to": None, "status": "unassigned"},
+                    ],
+                },
+                "evidence_counts": {"reports": 2, "photos": 2, "notes": 1},
+            }
+        )
+        with patch("app.hotspots.detect_hotspots", return_value=[payload]):
+            response = self.client.get("/admin/analytics/hotspots?trend=rising")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[0]["assignment_status"]["assigned"], 1)
+        self.assertEqual(response.json()[0]["evidence_counts"]["photos"], 2)
 
 
 if __name__ == "__main__":
