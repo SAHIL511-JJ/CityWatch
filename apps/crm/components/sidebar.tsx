@@ -1,10 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch, clearToken, getToken } from "@/lib/api";
+import { NavigationLink } from "@/components/ui/navigation-link";
+import { useNavigationFeedback } from "@/components/ui/navigation-feedback";
 
 type Item = { href: string; label: string; badge?: number; icon: React.ReactNode };
 
@@ -35,6 +36,7 @@ const TITLES: Record<string, string> = {
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { beginNavigation } = useNavigationFeedback();
   const [userMenu, setUserMenu] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -148,6 +150,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   const signOut = () => {
     clearToken();
+    beginNavigation("/login");
     router.push("/login");
   };
 
@@ -194,7 +197,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
                     it.href === "/" ? pathname === "/" : pathname.startsWith(it.href);
                   return (
                     <li key={it.href}>
-                      <Link
+                      <NavigationLink
                         href={it.href}
                         title={it.label}
                         aria-current={active ? "page" : undefined}
@@ -214,7 +217,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
                             <span className="relative">{it.badge}</span>
                           </span>
                         )}
-                      </Link>
+                      </NavigationLink>
                     </li>
                   );
                 })}
@@ -240,14 +243,14 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <span aria-hidden className="text-zinc-300">/</span>
             <span className="truncate font-bold text-zinc-900">{title}</span>
           </nav>
-          <Link
+          <NavigationLink
             href="/incidents?window_days=30&state=needs_attention&sort=action"
             aria-label="Review queue — open incidents needing attention"
             className="shrink-0 rounded-md bg-[#14231a] px-2.5 py-1.5 text-xs font-semibold text-white transition hover:bg-[#2a4a33] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2 sm:px-3"
           >
             <span className="sm:hidden">Review</span>
             <span className="hidden sm:inline">Review queue</span>
-          </Link>
+          </NavigationLink>
           <span
             className="hidden rounded-full bg-[#14231a] px-2 py-0.5 text-[10px] font-semibold tracking-widest text-zinc-300 sm:inline-flex"
             title="Operations console v1"

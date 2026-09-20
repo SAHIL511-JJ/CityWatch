@@ -11,6 +11,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { FeedbackPanel } from "@/components/ui/feedback-panel";
+import { NavigationLink } from "@/components/ui/navigation-link";
 import { IncidentMiniMap } from "@/components/map";
 
 const FONT = { fontFamily: "Verdana, Geneva, sans-serif" } as const;
@@ -237,6 +239,16 @@ function collapseHistory(list: StatusHistoryEntry[]): CollapsedGroup[] {
   return groups;
 }
 
+function IncidentDetailSkeleton() {
+  const block = (className: string) => <div className={`animate-pulse rounded-xl bg-zinc-200/70 motion-reduce:animate-none ${className}`} />;
+  return (
+    <div className="mx-auto max-w-[1500px] space-y-6 pb-10" style={FONT} aria-label="Loading incident details">
+      <div className="space-y-2">{block("h-3 w-28")} {block("h-9 w-[min(42rem,85%)]")} {block("h-4 w-[min(34rem,70%)]")} </div>
+      <div className="grid gap-5 lg:grid-cols-5"><div className="space-y-5 lg:col-span-3">{block("h-[28rem] w-full")} {block("h-56 w-full")}</div><div className="space-y-5 lg:col-span-2">{block("h-56 w-full")} {block("h-72 w-full")} {block("h-40 w-full")}</div></div>
+    </div>
+  );
+}
+
 export default function IncidentDetailPage() {
   const params = useParams();
   const id = params.id as string;
@@ -296,7 +308,7 @@ export default function IncidentDetailPage() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["admin-incident", id],
     queryFn: () => apiFetch<IncidentDetail>(`/admin/incidents/${id}`),
   });
@@ -449,9 +461,26 @@ export default function IncidentDetailPage() {
     });
   }, [data?.history, data?.resolution_evidence, staffList.data]);
 
-  if (isLoading) return <p>Loading…</p>;
-  if (error) return <p className="text-red-600">{(error as Error).message}</p>;
-  if (!data) return <p>Not found</p>;
+  if (isLoading) return <IncidentDetailSkeleton />;
+  if (error) {
+    return (
+      <div className="mx-auto max-w-[900px] space-y-5 pb-10" style={FONT}>
+        <FeedbackPanel
+          variant="error"
+          title="Incident could not load"
+          description={(error as Error).message}
+          action={<div className="flex flex-wrap justify-center gap-2"><Button onClick={() => refetch()}>Retry</Button><NavigationLink href="/incidents" className="inline-flex items-center justify-center rounded-md bg-white px-4 py-2 text-sm font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 transition hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Back to Incidents</NavigationLink></div>}
+        />
+      </div>
+    );
+  }
+  if (!data) {
+    return (
+      <div className="mx-auto max-w-[900px] space-y-5 pb-10" style={FONT}>
+        <FeedbackPanel title="Incident not found" description="This incident may have been removed or is not available to your staff account." action={<NavigationLink href="/incidents" className="inline-flex items-center justify-center rounded-md bg-[#14231a] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#2a4a33] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Back to Incidents</NavigationLink>} />
+      </div>
+    );
+  }
 
   const ai = (data.ai_analysis ?? {}) as Record<string, unknown>;
   const resolutionEvidence: ResolutionEvidence[] = data.resolution_evidence ?? [];

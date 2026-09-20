@@ -1,9 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   Area,
   AreaChart,
@@ -23,6 +22,7 @@ import { InsightsMap, type MapBounds } from "@/components/map";
 import { InsightsTimeline } from "@/components/insights-timeline";
 import { InsightActionPlan } from "@/components/insight-action-plan";
 import { apiFetch } from "@/lib/api";
+import { NavigationLink } from "@/components/ui/navigation-link";
 import { categoryLabel } from "@/lib/taxonomy";
 import { buildReplayDays, DEFAULT_FILTERS, insightsQuery, localDayKey, readInsightsFilters, signalHref } from "@/lib/insights";
 import type { Hotspot, Incident, InsightsFilters, InsightsSnapshot } from "@/lib/types";
@@ -264,7 +264,7 @@ function SignalCard({ signal, filters, featured = false, selectedCategory = null
       <p className="mt-5 max-w-[62ch] text-sm leading-6 text-zinc-700">{signal.explanation}</p>
       <div className="mt-5"><InsightActionPlan plan={signal.action_plan} compact={!featured} presentation={featured ? "stacked" : "default"} /></div>
       <div className="mt-5 grid grid-cols-2 gap-3 border-y border-black/10 py-4 xl:grid-cols-4"><Metric label="Reports" value={signal.report_count} /><Metric label="Contributors" value={signal.unique_contributors} /><Metric label="Mean spread" value={`${signal.mean_distance_km.toFixed(2)} km`} /><Metric label="Trend" value={humanize(signal.trend)} /></div>
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-zinc-500">Last observed {dateTime(signal.last_observed)}</p><Link href={signalHref(signal.id, filters)} className="rounded-lg bg-[#14231a] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#285e4a] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Open evidence page →</Link></div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-zinc-500">Last observed {dateTime(signal.last_observed)}</p><NavigationLink href={signalHref(signal.id, filters)} className="rounded-lg bg-[#14231a] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#285e4a] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Open evidence page →</NavigationLink></div>
     </article>
   );
 }
@@ -278,7 +278,7 @@ function RankedSignalRow({ signal, filters, rank, selectedCategory = null }: { s
         <div className="flex flex-wrap items-center gap-2"><h3 className="text-base font-bold text-[#14231a]">{categoryLabel(signal.category)}</h3><span className="rounded-full bg-[#f4f6f3] px-2 py-0.5 text-[10px] font-bold capitalize text-[#55705c]">{signal.trend}</span>{relatedToMapSelection && <span className="rounded-full bg-[#dce8dc] px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-[#2a4a33]">Map selection</span>}</div>
         <p className="mt-1 truncate text-xs leading-5 text-zinc-600">{signal.report_count} reports · {signal.unique_contributors} contributors · last observed {dateTime(signal.last_observed)}</p>
       </div>
-      <div className="flex items-center justify-between gap-4 sm:justify-end"><div className="text-left sm:text-right"><p className="text-lg font-bold tabular-nums text-[#14231a]">{signal.persistence_score}</p><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">signal score</p></div><Link href={signalHref(signal.id, filters)} className="rounded-lg border border-[#b8ccb9] px-3 py-2 text-xs font-semibold text-[#2a4a33] transition hover:bg-[#edf5ed] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Inspect →</Link></div>
+      <div className="flex items-center justify-between gap-4 sm:justify-end"><div className="text-left sm:text-right"><p className="text-lg font-bold tabular-nums text-[#14231a]">{signal.persistence_score}</p><p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-500">signal score</p></div><NavigationLink href={signalHref(signal.id, filters)} className="rounded-lg border border-[#b8ccb9] px-3 py-2 text-xs font-semibold text-[#2a4a33] transition hover:bg-[#edf5ed] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Inspect →</NavigationLink></div>
     </article>
   );
 }
@@ -307,8 +307,8 @@ function SelectedPoint({ point, category, relatedSignal, filters, onFocusCategor
       <p className="mt-3 text-xs leading-5 text-zinc-600">{point.description}</p>
       <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-zinc-500"><span>{dateTime(point.created_at)}</span><span className="capitalize">{point.status.replaceAll("_", " ")}</span><span>{categoryLabel(category)}</span></div>
       <div className="mt-4 flex flex-wrap gap-3">
-        <Link href={`/incidents/${point.id}`} className="inline-flex text-xs font-semibold text-[#2a4a33] underline-offset-2 hover:underline">Open incident record →</Link>
-        {relatedSignal && <Link href={signalHref(relatedSignal.id, filters)} className="inline-flex text-xs font-semibold text-[#2a4a33] underline-offset-2 hover:underline">Open related {categoryLabel(relatedSignal.category)} signal →</Link>}
+        <NavigationLink href={`/incidents/${point.id}`} className="inline-flex text-xs font-semibold text-[#2a4a33] underline-offset-2 hover:underline">Open incident record →</NavigationLink>
+        {relatedSignal && <NavigationLink href={signalHref(relatedSignal.id, filters)} className="inline-flex text-xs font-semibold text-[#2a4a33] underline-offset-2 hover:underline">Open related {categoryLabel(relatedSignal.category)} signal →</NavigationLink>}
         <button type="button" onClick={onFocusCategory} className="inline-flex text-xs font-semibold text-[#2a4a33] underline-offset-2 hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Focus {categoryLabel(category)} signals →</button>
       </div>
     </div>
@@ -324,8 +324,11 @@ function AnalyticsPageContent() {
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
   const [selectedPoint, setSelectedPoint] = useState<Incident | null>(null);
   const [selectedPointCategory, setSelectedPointCategory] = useState<string | null>(null);
+  const [selectedPointLoading, setSelectedPointLoading] = useState(false);
+  const [selectedPointError, setSelectedPointError] = useState<string | null>(null);
   const [mapUpdating, setMapUpdating] = useState(false);
   const mapTimer = useRef<number | null>(null);
+  const pointRequest = useRef(0);
 
   useEffect(() => {
     const nextQuery = insightsQuery(filters);
@@ -334,7 +337,7 @@ function AnalyticsPageContent() {
 
   const query = insightsQuery(filters);
   const mapFitKey = useMemo(() => insightsQuery({ ...filters, bounds: null }), [filters]);
-  const insights = useQuery({ queryKey: ["admin-insights", query], queryFn: () => apiFetch<InsightsSnapshot>(`/admin/insights${query}`), staleTime: 30000 });
+  const insights = useQuery({ queryKey: ["admin-insights", query], queryFn: () => apiFetch<InsightsSnapshot>(`/admin/insights${query}`), staleTime: 30000, placeholderData: keepPreviousData });
   const data = insights.data;
   const narratives = data?.narratives ?? [];
   const lead = narratives[0];
@@ -358,6 +361,7 @@ function AnalyticsPageContent() {
     setSelectedPointId(null);
     setSelectedPoint(null);
     setSelectedPointCategory(null);
+    setSelectedPointError(null);
     setFilters((current) => ({ ...current, ...next }));
   }, []);
 
@@ -366,6 +370,7 @@ function AnalyticsPageContent() {
     setSelectedPointId(null);
     setSelectedPoint(null);
     setSelectedPointCategory(null);
+    setSelectedPointError(null);
     setFilters({ ...next });
   }, []);
 
@@ -385,12 +390,20 @@ function AnalyticsPageContent() {
   }, []);
 
   const selectPoint = useCallback(async (point: { id: string; category?: string }) => {
+    pointRequest.current += 1;
+    const requestId = pointRequest.current;
     setSelectedPointId(point.id);
     setSelectedPointCategory(point.category ?? null);
+    setSelectedPoint(null);
+    setSelectedPointError(null);
+    setSelectedPointLoading(true);
     try {
-      setSelectedPoint(await apiFetch<Incident>(`/admin/incidents/${point.id}`));
-    } catch {
-      setSelectedPoint(null);
+      const incident = await apiFetch<Incident>(`/admin/incidents/${point.id}`);
+      if (requestId === pointRequest.current) setSelectedPoint(incident);
+    } catch (error) {
+      if (requestId === pointRequest.current) setSelectedPointError(error instanceof Error ? error.message : "The selected report could not be loaded.");
+    } finally {
+      if (requestId === pointRequest.current) setSelectedPointLoading(false);
     }
   }, []);
 
@@ -400,7 +413,7 @@ function AnalyticsPageContent() {
         eyebrow="Authority intelligence"
         title="Insights"
         description="A focused view of what is repeating, where reports are concentrating, and which signals deserve a closer look."
-        meta={<><span className="block">{data ? `Updated ${dateTime(data.generated_at)}` : "Waiting for live data"}</span>{filters.bounds && <span className="mt-1 block font-semibold text-[#2a4a33]">Map area is applied</span>}</>}
+        meta={<><span className="block">{data ? `Updated ${dateTime(data.generated_at)}` : "Waiting for live data"}</span>{insights.isFetching && !insights.isLoading && <span className="mt-1 block font-semibold text-[#285e4a]" aria-live="polite">Updating evidence…</span>}{filters.bounds && <span className="mt-1 block font-semibold text-[#2a4a33]">Map area is applied</span>}</>}
       />
 
       <FilterBar filters={filters} categories={categories} onChange={updateFilters} onPreset={applyPreset} onClear={clearFilters} onRefresh={() => insights.refetch()} refreshing={insights.isFetching} mapUpdating={mapUpdating} />
@@ -425,6 +438,8 @@ function AnalyticsPageContent() {
           </Card>
           <aside className="min-w-0 space-y-5">
             {lead ? <SignalCard signal={lead} filters={filters} featured selectedCategory={selectedPointCategory} /> : <Card className="flex min-h-[260px] items-center justify-center border-[#dfe5dd] p-8 text-center"><div><p className="text-lg font-bold text-[#14231a]">No recurring signal in this scope</p><p className="mt-2 text-sm leading-6 text-zinc-500">Widen the time window or clear the map area to see more evidence.</p></div></Card>}
+            {selectedPointLoading && selectedPointId && <Card className="border-[#cbdacb] bg-[#f1f6ef] p-4" aria-label="Loading selected report"><div className="h-3 w-28 animate-pulse rounded bg-zinc-200" /><div className="mt-3 h-5 w-3/4 animate-pulse rounded bg-zinc-200" /><div className="mt-3 h-12 w-full animate-pulse rounded bg-zinc-100" /></Card>}
+            {selectedPointError && selectedPointId && <Card className="border-red-200 bg-red-50 p-4" role="alert"><p className="text-sm font-semibold text-red-900">Selected report could not load</p><p className="mt-1 text-xs leading-5 text-red-700">{selectedPointError}</p><button type="button" onClick={() => selectPoint({ id: selectedPointId, category: selectedPointCategory ?? undefined })} className="mt-3 rounded-md bg-[#14231a] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#2a4a33] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Retry selected report</button></Card>}
             {selectedPoint && selectedPointCategory && <SelectedPoint point={selectedPoint} category={selectedPointCategory} relatedSignal={selectedSignal} filters={filters} onFocusCategory={() => updateFilters({ category: selectedPointCategory })} />}
             <SignalDefinitions />
           </aside>

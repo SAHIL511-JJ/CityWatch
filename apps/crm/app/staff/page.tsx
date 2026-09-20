@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import type { StaffMember } from "@/lib/types";
@@ -9,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { FeedbackPanel } from "@/components/ui/feedback-panel";
 import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
+import { NavigationLink } from "@/components/ui/navigation-link";
 
 const FONT = { fontFamily: "Verdana, Geneva, sans-serif" } as const;
 
@@ -19,7 +20,7 @@ const ROLE_COLOR: Record<string, string> = {
 };
 
 export default function StaffPage() {
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["admin-staff"],
     queryFn: () => apiFetch<StaffMember[]>("/admin/staff"),
   });
@@ -52,7 +53,7 @@ export default function StaffPage() {
           ))}
         </div>
       )}
-      {error && !isLoading && <FeedbackPanel variant="error" title="Staff could not load" description={(error as Error).message} />}
+      {error && !isLoading && <FeedbackPanel variant="error" title="Staff could not load" description={(error as Error).message} action={<Button onClick={() => refetch()}>Retry</Button>} />}
       {!isLoading && !error && (data ?? []).length === 0 && <FeedbackPanel title="No staff members found" description="Invite or configure an operations staff member before assigning incidents." />}
       <div className="grid gap-3">
         {(data ?? []).map((s) => {
@@ -87,12 +88,12 @@ export default function StaffPage() {
                     {s.email} · {s.open_count} open incident{s.open_count === 1 ? "" : "s"}
                   </p>
                 </div>
-                <Link
+                <NavigationLink
                   href={`/incidents`}
                   className="rounded-sm text-xs font-semibold text-[#2a4a33] hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2"
                 >
                   View queue
-                </Link>
+                </NavigationLink>
               </div>
             </Card>
           );

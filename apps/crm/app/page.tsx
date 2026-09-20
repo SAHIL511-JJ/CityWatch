@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
@@ -11,6 +10,7 @@ import { categoryLabel } from "@/lib/taxonomy";
 import { Card } from "@/components/ui/card";
 import { FeedbackPanel } from "@/components/ui/feedback-panel";
 import { PageHeader } from "@/components/ui/page-header";
+import { NavigationLink } from "@/components/ui/navigation-link";
 import {
   Area,
   AreaChart,
@@ -86,7 +86,7 @@ function Kpi({
   // Always draw the sparkline — a single day renders flat with a tooltip note.
   const single = spark.length < 2;
   return (
-    <Link
+    <NavigationLink
       href={href}
       className="group relative block overflow-hidden rounded-lg border border-zinc-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2"
       aria-label={`${label}: ${value}. ${definition}. Open matching incidents.`}
@@ -115,7 +115,7 @@ function Kpi({
       <p className="mt-1 text-xs text-zinc-500">{sub}</p>
       <p className="mt-3 border-t border-zinc-100 pt-2 text-[11px] leading-5 text-zinc-500 group-hover:text-zinc-700">{definition}</p>
       <span className="mt-2 inline-flex text-xs font-semibold text-[#285e4a]">Open matching incidents →</span>
-    </Link>
+    </NavigationLink>
   );
 }
 
@@ -155,25 +155,25 @@ function ActionPanel({ action }: { action: ActionCounts }) {
           <h2 id="needs-action-heading" className="mt-1 text-xl font-bold tracking-[-0.02em] text-[#14231a]">Needs action</h2>
           <p className="mt-1 max-w-[62ch] text-sm leading-6 text-zinc-600">Open work in the last 30 calendar days, ordered for the next response.</p>
         </div>
-        <Link href={incidentHref({ window_days: 30, state: "needs_attention", sort: "action" })} className="rounded-md bg-[#14231a] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#2a4a33] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Open full queue →</Link>
+        <NavigationLink href={incidentHref({ window_days: 30, state: "needs_attention", sort: "action" })} className="rounded-md bg-[#14231a] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#2a4a33] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Open full queue →</NavigationLink>
       </div>
       {!hasAction ? (
         <p className="mt-4 rounded-lg border border-[#cbdacb] bg-white/70 px-4 py-3 text-sm text-[#285e4a]">No incident needs immediate action in this window.</p>
       ) : (
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           {items.map((item) => (
-            <Link key={item.label} href={item.href} className={`rounded-lg border p-4 transition hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2 ${item.tone}`}>
+            <NavigationLink key={item.label} href={item.href} className={`rounded-lg border p-4 transition hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2 ${item.tone}`}>
               <div className="flex items-start justify-between gap-3"><span className="text-sm font-semibold">{item.label}</span><span className="text-3xl font-bold tabular-nums">{item.value}</span></div>
               <p className="mt-2 text-xs opacity-80">{item.detail}</p>
               <span className="mt-3 inline-flex text-xs font-semibold underline-offset-2 hover:underline">Open scoped queue →</span>
-            </Link>
+            </NavigationLink>
           ))}
         </div>
       )}
       {(action.breaching > 0 || action.needs_follow_up > 0) && (
         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t border-[#cbdacb] pt-3 text-xs text-zinc-600">
-          {action.breaching > 0 && <Link href={incidentHref({ window_days: 30, state: "needs_attention", sla: "breaching", sort: "action" })} className="font-semibold text-amber-800 underline-offset-2 hover:underline">{action.breaching} breaching SLA</Link>}
-          {action.needs_follow_up > 0 && <Link href={incidentHref({ window_days: 30, status: "needs_follow_up", sort: "action" })} className="font-semibold text-rose-800 underline-offset-2 hover:underline">{action.needs_follow_up} need follow-up</Link>}
+          {action.breaching > 0 && <NavigationLink href={incidentHref({ window_days: 30, state: "needs_attention", sla: "breaching", sort: "action" })} className="font-semibold text-amber-800 underline-offset-2 hover:underline">{action.breaching} breaching SLA</NavigationLink>}
+          {action.needs_follow_up > 0 && <NavigationLink href={incidentHref({ window_days: 30, status: "needs_follow_up", sort: "action" })} className="font-semibold text-rose-800 underline-offset-2 hover:underline">{action.needs_follow_up} need follow-up</NavigationLink>}
         </div>
       )}
     </section>
@@ -188,7 +188,7 @@ function SignalRow({ signal }: { signal: Hotspot }) {
       <div className="min-w-0"><p className="text-[10px] uppercase tracking-wide text-zinc-400 lg:hidden">Reports</p><p className="text-sm font-semibold tabular-nums text-zinc-800">{signal.report_count}</p></div>
       <div className="min-w-0"><p className="text-[10px] uppercase tracking-wide text-zinc-400 lg:hidden">Contributors</p><p className="text-sm font-semibold tabular-nums text-zinc-800">{signal.unique_contributors}</p></div>
       <div className="min-w-0"><p className="text-[10px] uppercase tracking-wide text-zinc-400 lg:hidden">Last observed</p><p className="text-xs text-zinc-600">{new Date(signal.last_observed).toLocaleDateString([], { month: "short", day: "numeric" })}</p></div>
-      <Link href={signalHref(signal.id, { ...DEFAULT_FILTERS, window_days: 30 })} className="min-w-0 whitespace-nowrap text-xs font-semibold text-[#285e4a] underline-offset-2 hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Open evidence →</Link>
+      <NavigationLink href={signalHref(signal.id, { ...DEFAULT_FILTERS, window_days: 30 })} className="min-w-0 whitespace-nowrap text-xs font-semibold text-[#285e4a] underline-offset-2 hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Open evidence →</NavigationLink>
     </li>
   );
 }
@@ -212,10 +212,7 @@ export default function DashboardPage() {
   if (summary.isLoading) {
     return (
       <div className="mx-auto max-w-[1500px] space-y-6 pb-10" style={FONT}>
-        <div>
-          <Skeleton className="h-7 w-56" />
-          <Skeleton className="mt-2 h-4 w-80" />
-        </div>
+        <PageHeader eyebrow="Authority operations" title="Command overview" description="Loading the latest operations data…" meta={<span aria-live="polite">Loading dashboard…</span>} />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-32" />
@@ -231,12 +228,15 @@ export default function DashboardPage() {
 
   if (summary.error) {
     return (
-      <FeedbackPanel
-        variant="error"
-        title="Dashboard failed to load"
-        description={(summary.error as Error).message}
-        action={<button onClick={() => summary.refetch()} className="rounded-md bg-[#14231a] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[#2a4a33] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Retry</button>}
-      />
+      <div className="mx-auto max-w-[1500px] space-y-6 pb-10" style={FONT}>
+        <PageHeader eyebrow="Authority operations" title="Command overview" description="The operations summary could not be loaded." />
+        <FeedbackPanel
+          variant="error"
+          title="Dashboard failed to load"
+          description={(summary.error as Error).message}
+          action={<button onClick={() => summary.refetch()} className="rounded-md bg-[#14231a] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[#2a4a33] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Retry</button>}
+        />
+      </div>
     );
   }
 
@@ -299,7 +299,7 @@ export default function DashboardPage() {
             <h2 className="text-sm font-bold uppercase tracking-wider text-zinc-500">Recurring environmental signals</h2>
             <p className="mt-1 text-sm text-zinc-500">Verified observations grouped by place, category, and time.</p>
           </div>
-          <Link href="/analytics" className="text-xs font-semibold text-[#2a4a33] hover:underline">Open analytics →</Link>
+          <NavigationLink href="/analytics" className="text-xs font-semibold text-[#2a4a33] hover:underline">Open analytics →</NavigationLink>
         </div>
         {hotspots.isLoading ? (
           <div className="mt-4 grid gap-2 sm:grid-cols-3"><Skeleton className="h-20" /><Skeleton className="h-20" /><Skeleton className="h-20" /></div>
@@ -456,7 +456,7 @@ export default function DashboardPage() {
         <Card className="p-5 lg:col-span-2">
           <div className="flex items-baseline justify-between">
             <h2 className="text-sm font-bold uppercase tracking-wider text-zinc-500">Status breakdown</h2>
-            <Link href={incidentHref({ window_days: 30 })} className="text-xs font-semibold text-[#2a4a33] hover:underline">Open all</Link>
+            <NavigationLink href={incidentHref({ window_days: 30 })} className="text-xs font-semibold text-[#2a4a33] hover:underline">Open all</NavigationLink>
           </div>
           {byStatus.length === 0 ? (
             <div className="mt-3 flex h-40 items-center justify-center rounded-lg bg-zinc-50 text-sm text-zinc-500">No incidents yet — the queue is clear.</div>
@@ -484,7 +484,7 @@ export default function DashboardPage() {
         <Card className="p-5 lg:col-span-3">
           <div className="flex items-baseline justify-between">
             <h2 className="text-sm font-bold uppercase tracking-wider text-zinc-500">Latest activity</h2>
-            <Link href={incidentHref({ window_days: 30 })} className="text-xs font-semibold text-[#2a4a33] hover:underline">View all incidents</Link>
+            <NavigationLink href={incidentHref({ window_days: 30 })} className="text-xs font-semibold text-[#2a4a33] hover:underline">View all incidents</NavigationLink>
           </div>
           {recent.isLoading ? (
             <div className="mt-3 space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-14" />)}</div>
@@ -499,7 +499,7 @@ export default function DashboardPage() {
                 const vm = SEV_META[i.severity] ?? { label: i.severity, color: "#52525b" };
                 return (
                   <li key={i.id}>
-                    <Link href={`/incidents/${i.id}`} className="flex items-center gap-3 py-2.5 transition hover:bg-zinc-50">
+                    <NavigationLink href={`/incidents/${i.id}`} className="flex items-center gap-3 py-2.5 transition hover:bg-zinc-50">
                       <span className="h-9 w-1 shrink-0 rounded-full" style={{ background: vm.color }} title={`${vm.label} severity`} />
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold">{i.title}</p>
@@ -511,7 +511,7 @@ export default function DashboardPage() {
                       <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ background: `${sm.color}14`, color: sm.color }}>
                         {sm.label}
                       </span>
-                    </Link>
+                    </NavigationLink>
                   </li>
                 );
               })}
@@ -519,7 +519,7 @@ export default function DashboardPage() {
           )}
           {queue.length > 0 && (
             <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
-              <b>{queue.length}</b> item{queue.length === 1 ? "" : "s"} needing review — oldest first in <Link href={incidentHref({ window_days: 30, state: "needs_attention", sort: "action" })} className="font-bold underline">Incidents</Link>.
+              <b>{queue.length}</b> item{queue.length === 1 ? "" : "s"} needing review — oldest first in <NavigationLink href={incidentHref({ window_days: 30, state: "needs_attention", sort: "action" })} className="font-bold underline">Incidents</NavigationLink>.
             </div>
           )}
         </Card>

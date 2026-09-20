@@ -86,7 +86,7 @@ test("staff can review a pending community follow-up", async ({ page }) => {
   });
 
   await page.goto("/incidents/incident-1");
-  await expect(page.getByText("Resolution workflow")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Resolution workflow" })).toBeVisible();
   await expect(page.getByText("Before — citizen report")).toBeVisible();
   await expect(page.getByText("After — authority evidence")).toBeVisible();
   await expect(page.getByText("Resolution timeline")).toBeVisible();
