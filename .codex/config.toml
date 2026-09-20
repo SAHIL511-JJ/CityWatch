@@ -1,0 +1,26 @@
+# CityWatch MCP catalog for trusted Codex clients in this repository.
+# OAuth credentials remain in the user's Codex host and are never committed.
+
+[mcp_servers.obsidian_citywatch]
+command = "npx"
+args = ["-y", "@mauricio.wolff/mcp-obsidian@latest", "vault_Citywatch"]
+cwd = ".."
+enabled = true
+default_tools_approval_mode = "writes"
+
+[mcp_servers.playwright]
+command = "npx"
+args = ["-y", "@playwright/mcp@latest", "--isolated", "--viewport-size=1440x900", "--timeout-action=15000"]
+enabled = true
+
+[mcp_servers.supabase_citywatch]
+url = "https://mcp.supabase.com/mcp?project_ref=lquxjfdqyachkdnrfmts"
+enabled = true
+default_tools_approval_mode = "writes"
+# Reauthenticate with:
+# codex mcp login supabase_citywatch --scopes projects:read,database:read,storage:read
+
+[mcp_servers.atlassian]
+url = "https://mcp.atlassian.com/v1/mcp/authv2"
+enabled = true
+default_tools_approval_mode = "writes"
