@@ -234,7 +234,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex min-w-0 items-center gap-3 overflow-hidden border-b border-[#e8e0d0] bg-[#faf7f0] px-4 py-3 sm:px-7">
+        <header className={`flex min-w-0 items-center gap-3 overflow-hidden border-b border-[#e8e0d0] bg-[#faf7f0] px-4 ${pathname === "/staff" ? "py-3 sm:px-9" : "py-3 sm:px-7"}`}>
           <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 truncate text-xl">
             <span className="font-medium text-zinc-400">CityWatch</span>
             <span aria-hidden className="text-zinc-300">/</span>
@@ -254,10 +254,20 @@ export function Shell({ children }: { children: React.ReactNode }) {
           >
             OPS · V1
           </span>
+          {pathname === "/staff" && (
+            <label className="relative ml-auto hidden w-[292px] lg:block">
+              <span className="sr-only">Search anything</span>
+              <svg viewBox="0 0 20 20" fill="none" className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-[#61718a]" aria-hidden="true">
+                <circle cx="8.7" cy="8.7" r="5.4" stroke="currentColor" strokeWidth="1.8" />
+                <path d="m13 13 4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+              <input aria-label="Search anything" placeholder="Search anything..." className="h-10 w-full rounded-lg border border-[#dbe1e3] bg-white/70 pl-10 pr-3 text-sm text-[#1c2b3d] outline-none placeholder:text-[#8792a3] focus:border-[#2a4a33] focus:ring-2 focus:ring-[#dce8dc]" />
+            </label>
+          )}
           <span className="hidden w-12 text-xs tabular-nums text-zinc-500 sm:block" title="Local time">
             {mounted ? clock : ""}
           </span>
-          <div className="relative ml-auto">
+          <div className={`relative ${pathname === "/staff" ? "" : "ml-auto"}`}>
             <button
               onClick={(e) => {
                 e.stopPropagation();
