@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch, getApiBase, getToken } from "@/lib/api";
 import type { DuplicatePair, IncidentDetail, IncidentStatus, ResolutionEvidence, Severity, StaffMember, StatusHistoryEntry } from "@/lib/types";
@@ -251,7 +251,10 @@ function IncidentDetailSkeleton() {
 
 export default function IncidentDetailPage() {
   const params = useParams();
+  const searchParams = useSearchParams();
   const id = params.id as string;
+  const requestedReturn = searchParams.get("return_to");
+  const returnTo = requestedReturn === "/incidents" || requestedReturn?.startsWith("/incidents?") ? requestedReturn : "/incidents";
   const qc = useQueryClient();
   const [note, setNote] = useState("");
   const [severity, setSeverity] = useState<Severity | "">("");
@@ -325,12 +328,23 @@ export default function IncidentDetailPage() {
     retry: false,
   });
 
-  const refresh = () => qc.invalidateQueries({ queryKey: ["admin-incident", id] });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["admin-incident", id] });
+    qc.invalidateQueries({ queryKey: ["admin-incidents"] });
+    qc.invalidateQueries({ queryKey: ["admin-staff"] });
+    qc.invalidateQueries({ queryKey: ["admin-staff-workspace"] });
+  };
 
   const patch = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       apiFetch(`/admin/incidents/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-    onSuccess: refresh,
+    onSuccess: (_result, body) => {
+      refresh();
+      if (Object.prototype.hasOwnProperty.call(body, "assigned_to")) {
+        const target = typeof body.assigned_to === "string" ? whoName(body.assigned_to) : null;
+        setToast({ msg: target ? `Assigned to ${target} — workload counts refreshed.` : "Incident unassigned — workload counts refreshed." });
+      }
+    },
   });
 
   const addNote = useMutation({
@@ -469,7 +483,7 @@ export default function IncidentDetailPage() {
           variant="error"
           title="Incident could not load"
           description={(error as Error).message}
-          action={<div className="flex flex-wrap justify-center gap-2"><Button onClick={() => refetch()}>Retry</Button><NavigationLink href="/incidents" className="inline-flex items-center justify-center rounded-md bg-white px-4 py-2 text-sm font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 transition hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Back to Incidents</NavigationLink></div>}
+          action={<div className="flex flex-wrap justify-center gap-2"><Button onClick={() => refetch()}>Retry</Button><NavigationLink href={returnTo} className="inline-flex items-center justify-center rounded-md bg-white px-4 py-2 text-sm font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 transition hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Back to queue</NavigationLink></div>}
         />
       </div>
     );
@@ -477,7 +491,7 @@ export default function IncidentDetailPage() {
   if (!data) {
     return (
       <div className="mx-auto max-w-[900px] space-y-5 pb-10" style={FONT}>
-        <FeedbackPanel title="Incident not found" description="This incident may have been removed or is not available to your staff account." action={<NavigationLink href="/incidents" className="inline-flex items-center justify-center rounded-md bg-[#14231a] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#2a4a33] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Back to Incidents</NavigationLink>} />
+        <FeedbackPanel title="Incident not found" description="This incident may have been removed or is not available to your staff account." action={<NavigationLink href={returnTo} className="inline-flex items-center justify-center rounded-md bg-[#14231a] px-4 py-2 text-sm font-medium text-white transition hover:bg-[#2a4a33] focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Back to queue</NavigationLink>} />
       </div>
     );
   }
@@ -601,6 +615,7 @@ export default function IncidentDetailPage() {
     <div className="space-y-5" style={FONT}>
       {/* Header: status first, then title, then context */}
       <div>
+        <NavigationLink href={returnTo} className="mb-3 inline-flex text-sm font-semibold text-[#285e4a] hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">← Back to queue</NavigationLink>
         <div className="flex flex-wrap items-center gap-2 capitalize">
           <Badge value={data.status} />
           <Badge value={data.severity} />
@@ -1197,7 +1212,7 @@ export default function IncidentDetailPage() {
                   <option value="">Select staff…</option>
                   {(staffList.data ?? []).map((u) => (
                     <option key={u.id} value={u.id}>
-                      {staffName(u.email, u.id)} · {u.role} · {u.open_count} open
+                      {staffName(u.email, u.id)} · {u.role} · {u.availability ?? "available"} · {u.open_count} open
                     </option>
                   ))}
                 </select>

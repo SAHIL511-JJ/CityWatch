@@ -1,4 +1,7 @@
+import hashlib
 import math
+import re
+import secrets
 from datetime import datetime, timedelta
 
 from fastapi import (
@@ -22,6 +25,7 @@ from .auth import (
     create_token,
     get_current_staff,
     get_current_user,
+    hash_password,
     new_code,
     store_code,
 )
@@ -34,12 +38,14 @@ from .incident_status import (
     allowed_manual_statuses,
     can_manual_transition,
 )
+from .mailer import InvitationEmailError, send_staff_invitation
 from .models import (
     Category,
     Incident,
     IncidentNote,
     ResolutionEvidence,
     Staff,
+    StaffInvitation,
     StatusHistory,
     User,
 )
@@ -83,10 +89,12 @@ TRIAGE_STATUSES = POLICY_TRIAGE_STATUSES
 VALID_INCIDENT_STATUSES = ALL_INCIDENT_STATUSES
 PUBLIC_CITIZEN_INCIDENT_STATUSES = {"verified", "awaiting_verification"}
 TERMINAL_INCIDENT_STATUSES = {"resolved", "community_confirmed", "closed"}
-INCIDENT_QUEUES = {"mine", "unassigned"}
+INCIDENT_QUEUES = {"mine", "unassigned", "open"}
 INCIDENT_SORTS = {"newest", "oldest", "severity", "action"}
 INCIDENT_STATES = {"needs_attention", "resolved"}
 INCIDENT_SLA_FILTERS = {"overdue", "breaching"}
+STAFF_AVAILABILITIES = {"available", "busy", "away"}
+INVITATION_TTL_HOURS = 72
 NEEDS_ATTENTION_STATUSES = {
     "processing",
     "needs_review",
@@ -132,6 +140,20 @@ class NoteIn(BaseModel):
     note: str
 
 
+class AvailabilityPatchIn(BaseModel):
+    availability: str
+
+
+class InvitationCreateIn(BaseModel):
+    email: str
+    role: str = "dispatcher"
+
+
+class InvitationAcceptIn(BaseModel):
+    token: str
+    password: str = Field(min_length=8, max_length=200)
+
+
 class AdminIncidentPage(BaseModel):
     items: list[dict]
     total: int
@@ -145,6 +167,7 @@ class BulkFiltersIn(BaseModel):
     status: str | None = None
     severity: str | None = None
     queue: str | None = None
+    assignee_id: str | None = None
     window_days: int | None = Field(default=None, ge=1, le=365)
     state: str | None = None
     sla: str | None = None
@@ -804,6 +827,7 @@ def _clean_incident_scope(
     state: str | None,
     sla: str | None,
     sort: str,
+    assignee_id: str | None,
 ) -> tuple[
     str | None,
     str | None,
@@ -813,6 +837,7 @@ def _clean_incident_scope(
     str | None,
     str | None,
     str,
+    str | None,
 ]:
     clean_q = (q or "").strip() or None
     if clean_q and len(clean_q) > 100:
@@ -835,7 +860,10 @@ def _clean_incident_scope(
         raise HTTPException(422, "SLA filters cannot target resolved incidents")
     if sort not in INCIDENT_SORTS:
         raise HTTPException(422, "invalid incident sort")
-    return clean_q, status, severity, queue, window_days, state, sla, sort
+    # Reject incompatible combinations rather than silently applying surprising filters.
+    if assignee_id is not None and queue not in (None, "open"):
+        raise HTTPException(422, "assignee_id can only be combined with the open queue")
+    return clean_q, status, severity, queue, window_days, state, sla, sort, assignee_id
 
 
 def _incident_overdue_clause():
@@ -867,6 +895,7 @@ def _apply_incident_scope(
     state: str | None,
     sla: str | None,
     staff_id: str,
+    assignee_id: str | None,
 ):
     if q:
         pattern = f"%{q}%"
@@ -895,6 +924,10 @@ def _apply_incident_scope(
             Incident.assigned_to.is_(None),
             Incident.status.notin_(TERMINAL_INCIDENT_STATUSES),
         )
+    elif queue == "open":
+        query = query.filter(Incident.status.notin_(TERMINAL_INCIDENT_STATUSES))
+        if assignee_id is not None:
+            query = query.filter(Incident.assigned_to == assignee_id)
     if sla:
         query = query.filter(Incident.status.notin_(TERMINAL_INCIDENT_STATUSES))
         query = query.filter(
@@ -936,6 +969,7 @@ def admin_list(
     status: str | None = None,
     severity: str | None = None,
     queue: str | None = None,
+    assignee_id: str | None = None,
     window_days: int | None = Query(None, ge=1, le=365),
     state: str | None = None,
     sla: str | None = None,
@@ -945,7 +979,7 @@ def admin_list(
     staff: Staff = Depends(get_current_staff),
     db: Session = Depends(get_db),
 ):
-    q, status, severity, queue, window_days, state, sla, sort = _clean_incident_scope(
+    q, status, severity, queue, window_days, state, sla, sort, assignee_id = _clean_incident_scope(
         q=q,
         status=status,
         severity=severity,
@@ -954,6 +988,7 @@ def admin_list(
         state=state,
         sla=sla,
         sort=sort,
+        assignee_id=assignee_id,
     )
     query = _apply_incident_scope(
         db.query(Incident),
@@ -965,6 +1000,7 @@ def admin_list(
         state=state,
         sla=sla,
         staff_id=str(staff.id),
+        assignee_id=assignee_id,
     )
     total = query.count()
     total_pages = math.ceil(total / page_size) if total else 0
@@ -1051,6 +1087,8 @@ def admin_patch(
                     note=f"Emergency close: {close_reason}",
                 )
             )
+    if body.status is not None or body.severity is not None or "assigned_to" in body.model_fields_set:
+        _touch_staff_activity(db, staff)
     db.commit()
     db.refresh(i)
     return admin_incident_out(i)
@@ -1067,6 +1105,7 @@ def admin_note(
         raise HTTPException(404, "not found")
     n = IncidentNote(incident_id=incident_id, staff_id=staff.id, note=body.note)
     db.add(n)
+    _touch_staff_activity(db, staff)
     db.commit()
     db.refresh(n)
     return {
@@ -1102,10 +1141,203 @@ def admin_staff(
                 "id": str(s.id),
                 "email": s.email,
                 "role": s.role,
+                "availability": s.availability,
+                "availability_updated_at": s.availability_updated_at.isoformat()
+                if s.availability_updated_at
+                else None,
+                "last_active_at": s.last_active_at.isoformat() if s.last_active_at else None,
                 "open_count": int(open_count or 0),
             }
         )
     return out
+
+
+# ---------- staff workspace (KAN-52/53) ----------
+def require_admin(staff: Staff = Depends(get_current_staff)) -> Staff:
+    """Admin-only guard. Checks the current database role, not just the JWT claim."""
+    if staff.role != "admin":
+        raise HTTPException(403, "admin only")
+    return staff
+
+
+def _touch_staff_activity(db: Session, staff: Staff) -> None:
+    """Record a real staff action. Never infers presence from reads/logins."""
+    staff.last_active_at = datetime.utcnow()
+
+
+def _staff_member_out(db: Session, s: Staff) -> dict:
+    open_count = (
+        db.query(func.count())
+        .filter(
+            Incident.assigned_to == s.id,
+            Incident.status.notin_(TERMINAL_INCIDENT_STATUSES),
+        )
+        .scalar()
+    )
+    return {
+        "id": str(s.id),
+        "email": s.email,
+        "role": s.role,
+        "availability": s.availability,
+        "availability_updated_at": s.availability_updated_at.isoformat()
+        if s.availability_updated_at
+        else None,
+        "last_active_at": s.last_active_at.isoformat() if s.last_active_at else None,
+        "open_count": int(open_count or 0),
+    }
+
+
+@app.get("/admin/staff/workspace")
+def admin_staff_workspace(
+    staff: Staff = Depends(get_current_staff), db: Session = Depends(get_db)
+):
+    rows = db.query(Staff).order_by(Staff.email.asc()).all()
+    members = [_staff_member_out(db, s) for s in rows]
+    active_staff = sum(1 for m in members if m["availability"] in {"available", "busy"})
+    total_open_workload = sum(m["open_count"] for m in members)
+    unassigned_open = (
+        db.query(func.count())
+        .filter(
+            Incident.assigned_to.is_(None),
+            Incident.status.notin_(TERMINAL_INCIDENT_STATUSES),
+        )
+        .scalar()
+    )
+    return {
+        "active_staff": int(active_staff),
+        "total_staff": len(members),
+        "total_open_workload": int(total_open_workload),
+        "unassigned_open": int(unassigned_open or 0),
+        "members": members,
+    }
+
+
+@app.patch("/admin/staff/{staff_id}/availability")
+def admin_staff_availability(
+    staff_id: str,
+    body: AvailabilityPatchIn,
+    staff: Staff = Depends(get_current_staff),
+    db: Session = Depends(get_db),
+):
+    availability = (body.availability or "").strip().lower()
+    if availability not in STAFF_AVAILABILITIES:
+        raise HTTPException(422, "invalid availability")
+    target = db.get(Staff, staff_id)
+    if target is None:
+        raise HTTPException(404, "staff not found")
+    is_self = str(target.id) == str(staff.id)
+    if not is_self and staff.role != "admin":
+        raise HTTPException(403, "only admins can change another member's availability")
+    target.availability = availability
+    target.availability_updated_at = datetime.utcnow()
+    _touch_staff_activity(db, staff)
+    db.commit()
+    db.refresh(target)
+    return _staff_member_out(db, target)
+
+
+def _hash_invitation_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+@app.post("/admin/staff/invitations", status_code=201)
+def admin_create_invitation(
+    body: InvitationCreateIn,
+    staff: Staff = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    email = (body.email or "").strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(422, "valid email is required")
+    role = (body.role or "dispatcher").strip().lower()
+    if role not in {"admin", "dispatcher", "analyst"}:
+        raise HTTPException(422, "invalid role")
+    if not settings.CRM_PUBLIC_URL:
+        raise HTTPException(503, "CRM_PUBLIC_URL is not configured")
+
+    existing_staff = db.query(Staff).filter(Staff.email == email).first()
+    if existing_staff is not None:
+        raise HTTPException(409, "a staff account already exists for this email")
+
+    # Re-inviting revokes the previous pending invitation.
+    now = datetime.utcnow()
+    pending = (
+        db.query(StaffInvitation)
+        .filter(
+            StaffInvitation.email == email,
+            StaffInvitation.accepted_at.is_(None),
+            StaffInvitation.revoked_at.is_(None),
+        )
+        .all()
+    )
+    for inv in pending:
+        inv.revoked_at = now
+
+    token = secrets.token_urlsafe(32)
+    invitation = StaffInvitation(
+        email=email,
+        role=role,
+        token_hash=_hash_invitation_token(token),
+        invited_by=str(staff.id),
+        expires_at=now + timedelta(hours=INVITATION_TTL_HOURS),
+    )
+    db.add(invitation)
+    db.flush()  # assign id + created_at before we attempt delivery
+
+    accept_url = f"{settings.CRM_PUBLIC_URL.rstrip('/')}/invite?token={token}"
+    try:
+        send_staff_invitation(email, role, accept_url)
+    except InvitationEmailError as exc:
+        db.rollback()  # never leave a usable invitation behind
+        raise HTTPException(502, f"invitation email could not be sent: {exc}") from exc
+
+    db.commit()
+    return {
+        "id": str(invitation.id),
+        "email": email,
+        "role": role,
+        "expires_at": invitation.expires_at.isoformat(),
+    }
+
+
+@app.post("/admin/staff/invitations/accept")
+def admin_accept_invitation(
+    body: InvitationAcceptIn, db: Session = Depends(get_db)
+):
+    """Public endpoint: activate an invited staff account from a one-time token."""
+    token = (body.token or "").strip()
+    if not token:
+        raise HTTPException(400, "token is required")
+    token_hash = _hash_invitation_token(token)
+    invitation = (
+        db.query(StaffInvitation)
+        .filter(StaffInvitation.token_hash == token_hash)
+        .first()
+    )
+    now = datetime.utcnow()
+    if (
+        invitation is None
+        or invitation.revoked_at is not None
+        or invitation.accepted_at is not None
+        or invitation.expires_at is None
+        or invitation.expires_at.replace(tzinfo=None) <= now
+    ):
+        raise HTTPException(400, "invitation is invalid, expired, or already used")
+
+    if db.query(Staff).filter(Staff.email == invitation.email).first() is not None:
+        raise HTTPException(409, "a staff account already exists for this email")
+
+    member = Staff(
+        email=invitation.email,
+        password_hash=hash_password(body.password),
+        role=invitation.role,
+    )
+    db.add(member)
+    invitation.accepted_at = now
+    db.commit()
+    db.refresh(member)
+    return {"id": str(member.id), "email": member.email, "role": member.role}
+
 
 
 # ---------- suspected duplicates + merge (KAN-15) ----------
@@ -1334,11 +1566,13 @@ def admin_bulk(
             filter_state,
             filter_sla,
             _,
+            filter_assignee_id,
         ) = _clean_incident_scope(
             q=filters.q,
             status=filters.status,
             severity=filters.severity,
             queue=filters.queue,
+            assignee_id=filters.assignee_id,
             window_days=filters.window_days,
             state=filters.state,
             sla=filters.sla,
@@ -1354,6 +1588,7 @@ def admin_bulk(
             state=filter_state,
             sla=filter_sla,
             staff_id=str(staff.id),
+            assignee_id=filter_assignee_id,
         )
         explicit_ids = [str(row.id) for row in target_query.all()]
     matched = len(explicit_ids)
@@ -1427,6 +1662,8 @@ def admin_bulk(
                 )
             )
         results.append({"id": str(i.id), "ok": True, "changed": changed})
+    if any(result["changed"] for result in results if result["ok"]):
+        _touch_staff_activity(db, staff)
     db.commit()
     return {
         "matched": matched,

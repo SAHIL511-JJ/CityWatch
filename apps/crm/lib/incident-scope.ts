@@ -4,7 +4,7 @@ export const INCIDENT_PAGE_SIZE = 25;
 
 export type IncidentStateFilter = "" | "needs_attention" | "resolved";
 export type IncidentSlaFilter = "" | "overdue" | "breaching";
-export type IncidentQueueFilter = "" | "mine" | "unassigned";
+export type IncidentQueueFilter = "open" | "mine" | "unassigned";
 export type IncidentSort = "newest" | "oldest" | "severity" | "action";
 
 export interface IncidentScope {
@@ -12,6 +12,7 @@ export interface IncidentScope {
   status: string;
   severity: string;
   queue: IncidentQueueFilter;
+  assignee_id: string;
   window_days: number | null;
   state: IncidentStateFilter;
   sla: IncidentSlaFilter;
@@ -29,14 +30,20 @@ export function readIncidentScope(params: Readonly<URLSearchParams>): IncidentSc
   const sla = params.get("sla") as IncidentSlaFilter;
   const sort = params.get("sort");
   const queue = params.get("queue");
+  const rawAssignee = params.get("assignee_id") ?? "";
+  const assignee_id = /^[0-9a-f-]{36}$/i.test(rawAssignee) ? rawAssignee : "";
+  const parsedState = VALID_STATES.includes(state) ? state : "";
 
   return {
     q: params.get("q") ?? "",
     status: params.get("status") ?? "",
     severity: params.get("severity") ?? "",
-    queue: queue === "mine" || queue === "unassigned" ? queue : "",
+    queue: queue === "mine" || queue === "unassigned" || queue === "open"
+      ? queue
+      : "open",
+    assignee_id,
     window_days: Number.isInteger(windowDays) && windowDays >= 1 && windowDays <= 365 ? windowDays : null,
-    state: VALID_STATES.includes(state) ? state : "",
+    state: parsedState,
     sla: VALID_SLA.includes(sla) ? sla : "",
     sort: sort === "oldest" || sort === "severity" || sort === "action" ? sort : "newest",
     page: Number.isInteger(page) && page > 0 ? page : 1,
@@ -49,6 +56,7 @@ export function incidentScopeQuery(scope: IncidentScope, includePageSize = true)
     status: scope.status || undefined,
     severity: scope.severity || undefined,
     queue: scope.queue || undefined,
+    assignee_id: scope.assignee_id || undefined,
     window_days: scope.window_days ? String(scope.window_days) : undefined,
     state: scope.state || undefined,
     sla: scope.sla || undefined,
@@ -64,6 +72,7 @@ export function incidentHref(params: Partial<IncidentScope>): string {
     status: params.status || undefined,
     severity: params.severity || undefined,
     queue: params.queue || undefined,
+    assignee_id: params.assignee_id || undefined,
     window_days: params.window_days ? String(params.window_days) : undefined,
     state: params.state || undefined,
     sla: params.sla || undefined,

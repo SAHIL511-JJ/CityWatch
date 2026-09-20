@@ -178,6 +178,8 @@ function IncidentsInner() {
 
   const replaceScope = (updates: Partial<typeof scope>) => {
     const next = { ...scope, ...updates };
+    if (updates.queue && updates.queue !== "open") next.assignee_id = "";
+    if (updates.assignee_id) next.queue = "open";
     if (updates.status) {
       next.state = "";
       next.sla = "";
@@ -205,7 +207,7 @@ function IncidentsInner() {
     setSelectionMode(null);
     setPendingBulk(null);
     setBulkAssignee("");
-  }, [scope.q, scope.status, scope.severity, scope.queue, scope.window_days, scope.state, scope.sla, scope.sort, scope.page]);
+  }, [scope.q, scope.status, scope.severity, scope.queue, scope.assignee_id, scope.window_days, scope.state, scope.sla, scope.sort, scope.page]);
 
   useEffect(() => {
     if (data && data.page !== scope.page) replaceScope({ page: data.page });
@@ -244,17 +246,27 @@ function IncidentsInner() {
       )
     : [];
   const pageSelected = rows.length > 0 && rows.every((row) => selected[row.id]);
-  const hasScope = !!scope.q || !!scope.status || !!scope.severity || !!scope.queue || !!scope.window_days || !!scope.state || !!scope.sla || scope.sort !== "newest" || scope.page > 1;
+  const hasScope = !!scope.q || !!scope.status || !!scope.severity || scope.queue !== "open" || !!scope.assignee_id || !!scope.window_days || !!scope.state || !!scope.sla || scope.sort !== "newest" || scope.page > 1;
   const total = data?.total ?? 0;
   const totalPages = data?.total_pages ?? 0;
   const firstResult = total === 0 ? 0 : (scope.page - 1) * INCIDENT_PAGE_SIZE + 1;
   const lastResult = total === 0 ? 0 : Math.min(scope.page * INCIDENT_PAGE_SIZE, total);
+  const selectedAssignee = scope.assignee_id ? staffById.get(scope.assignee_id) : undefined;
+  const queueTitle = selectedAssignee
+    ? `${staffName(selectedAssignee.email, selectedAssignee.id)}’s queue`
+    : scope.queue === "mine"
+      ? "My queue"
+      : scope.queue === "unassigned"
+        ? "Unassigned"
+        : "All open";
+  const returnTo = `${pathname}${incidentScopeQuery(scope, false)}`;
 
   const refreshAll = () => {
     qc.invalidateQueries({ queryKey: ["admin-incidents"] });
     qc.invalidateQueries({ queryKey: ["admin-recent"] });
     qc.invalidateQueries({ queryKey: ["admin-duplicates"] });
     qc.invalidateQueries({ queryKey: ["admin-staff"] });
+    qc.invalidateQueries({ queryKey: ["admin-staff-workspace"] });
     qc.invalidateQueries({ queryKey: ["sidebar-needs-review"] });
   };
 
@@ -275,6 +287,7 @@ function IncidentsInner() {
     status: scope.status || null,
     severity: scope.severity || null,
     queue: scope.queue || null,
+    assignee_id: scope.assignee_id || null,
     window_days: scope.window_days,
     state: scope.state || null,
     sla: scope.sla || null,
@@ -293,9 +306,11 @@ function IncidentsInner() {
   };
 
   const clearOne = (key: keyof typeof scope) => {
-    if (key === "q" || key === "status" || key === "severity" || key === "queue" || key === "state" || key === "sla") replaceScope({ [key]: "", page: 1 });
+    if (key === "q" || key === "status" || key === "severity" || key === "state" || key === "sla") replaceScope({ [key]: "", page: 1 });
+    else if (key === "queue") replaceScope({ queue: "open", assignee_id: "", page: 1 });
     else if (key === "window_days") replaceScope({ window_days: null, page: 1 });
     else if (key === "sort") replaceScope({ sort: "newest", page: 1 });
+    else if (key === "assignee_id") replaceScope({ assignee_id: "", page: 1 });
     else replaceScope({ page: 1 });
   };
 
@@ -328,7 +343,7 @@ function IncidentsInner() {
     <div className="mx-auto max-w-[1500px] space-y-6 pb-10" style={FONT}>
       <PageHeader
         eyebrow="Review queue"
-        title="Incidents"
+        title={queueTitle}
         description="Scan reports, focus the right queue, and move each incident to its next safe action."
         meta={<span aria-live="polite">{isLoading ? "Loading queue…" : `${total} matching incident${total === 1 ? "" : "s"}`}</span>}
       />
@@ -355,7 +370,7 @@ function IncidentsInner() {
           <div className="w-full sm:w-auto">
             <label htmlFor="inc-queue" className="mb-1 block text-xs font-medium text-zinc-500">Queue</label>
             <select id="inc-queue" className={`${selectCls} w-full sm:w-auto`} value={scope.queue} onChange={(event) => replaceScope({ queue: event.target.value as typeof scope.queue, page: 1 })}>
-              <option value="">All incidents</option>
+              <option value="open">All open — every non-terminal incident</option>
               <option value="mine">My queue — open and assigned to you</option>
               <option value="unassigned">Unassigned — open with no owner</option>
             </select>
@@ -376,13 +391,15 @@ function IncidentsInner() {
           {scope.q && <FilterChip label={`Search: ${scope.q}`} onRemove={() => clearOne("q")} />}
           {scope.status && <FilterChip label={`Status: ${labelFor(scope.status)}`} onRemove={() => clearOne("status")} />}
           {scope.severity && <FilterChip label={`Severity: ${scope.severity}`} onRemove={() => clearOne("severity")} />}
+          {scope.queue === "open" && !scope.assignee_id && hasScope && <FilterChip label="Queue: All open — non-terminal" onRemove={() => clearOne("queue")} />}
           {scope.queue === "mine" && <FilterChip label="Queue: My queue — open and assigned to you" onRemove={() => clearOne("queue")} />}
           {scope.queue === "unassigned" && <FilterChip label="Queue: Unassigned — open with no owner" onRemove={() => clearOne("queue")} />}
+          {selectedAssignee && <FilterChip label={`Queue: ${staffName(selectedAssignee.email, selectedAssignee.id)}`} onRemove={() => replaceScope({ assignee_id: "", page: 1 })} />}
           {scope.window_days && <FilterChip label={`Last ${scope.window_days} days`} onRemove={() => clearOne("window_days")} />}
           {scope.state && <FilterChip label={`State: ${scope.state === "needs_attention" ? "Needs attention" : "Resolved"}`} onRemove={() => clearOne("state")} />}
           {scope.sla && <FilterChip label={`SLA: ${scope.sla === "overdue" ? "Overdue" : "Breaching"}`} onRemove={() => clearOne("sla")} />}
           {scope.sort !== "newest" && <FilterChip label={`Sort: ${scope.sort === "action" ? "Needs action" : scope.sort}`} onRemove={() => clearOne("sort")} />}
-          {!hasScope && <span className="text-xs text-zinc-500">All incidents · newest first</span>}
+          {!hasScope && <span className="text-xs text-zinc-500">All open incidents · newest first</span>}
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-zinc-100 pt-3">
@@ -415,9 +432,9 @@ function IncidentsInner() {
 
       {isLoading && <SkeletonRows />}
       {error && !isLoading && <FeedbackPanel variant="error" title="Incidents could not load" description={(error as Error).message} action={<Button onClick={() => refetch()} className="bg-[#14231a] hover:bg-[#2a4a33]">Retry</Button>} />}
-      {!isLoading && !error && rows.length === 0 && <FeedbackPanel title="No incidents match this scope" description={hasScope ? "Try removing a filter or clear all to return to the full queue." : "There are no incidents in the current queue."} action={hasScope ? <Button onClick={clearAll} className="bg-[#14231a] hover:bg-[#2a4a33]">Clear all</Button> : undefined} />}
+      {!isLoading && !error && rows.length === 0 && <FeedbackPanel title="No incidents match this scope" description={hasScope ? "Try removing a filter or clear all to return to All open." : "There are no open incidents in the current queue."} action={hasScope ? <Button onClick={clearAll} className="bg-[#14231a] hover:bg-[#2a4a33]">Clear all</Button> : undefined} />}
 
-      {!isLoading && !error && rows.length > 0 && <section aria-label="Incident results" aria-busy={isFetching} className={`space-y-2 transition-opacity ${isFetching ? "opacity-70" : ""}`}><div className="flex items-center gap-2 px-1 text-xs text-zinc-500"><input type="checkbox" aria-label={`Select page (${rows.length})`} checked={pageSelected} onChange={(event) => selectPage(event.target.checked)} className="h-4 w-4 accent-[#2a4a33]" /><span>Select page ({rows.length})</span></div><div className="grid gap-2">{rows.map((inc) => { const src = thumbSrc(inc); const location = inc.address ?? `${inc.lat.toFixed(3)}, ${inc.lng.toFixed(3)}`; const sla = slaFor(inc.created_at, inc.severity, inc.status); const duplicates = dupCount.get(inc.id) ?? []; const owner = ownerName(inc.assigned_to); return <Card key={inc.id} className="relative overflow-hidden p-3 transition-shadow hover:shadow-md"><span aria-hidden className={`absolute inset-y-0 left-0 w-1 ${SEV_BAR[inc.severity]}`} /><div className="grid gap-3 pl-2 xl:grid-cols-[auto_auto_minmax(18rem,1fr)_minmax(130px,auto)_minmax(105px,auto)_auto] xl:items-center"><input type="checkbox" aria-label={`Select ${inc.title}`} checked={!!selected[inc.id]} onChange={(event) => selectRow(inc.id, event.target.checked)} className="h-4 w-4 accent-[#2a4a33]" /><Thumb src={src} /><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><NavigationLink href={`/incidents/${inc.id}`} className="max-w-full font-semibold text-zinc-900 underline-offset-2 transition hover:text-[#2a4a33] hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">{inc.title}</NavigationLink>{duplicates.length > 0 && <NavigationLink href={`/incidents/${inc.id}#duplicates`} title={duplicates.map((item) => `Score ${item.score} · ${item.distance_m}m · ${item.hours_apart}h apart`).join("\n")} className="rounded-md bg-purple-50 px-1.5 py-0.5 text-[11px] font-bold text-purple-800 hover:bg-purple-100 focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">{duplicates.length} duplicate{duplicates.length > 1 ? "s" : ""}</NavigationLink>}</div><p className="mt-0.5 truncate text-xs text-zinc-500" title={location}>{location}</p><p className="mt-1 line-clamp-2 max-w-2xl text-sm leading-relaxed text-zinc-600">{inc.description || "No description provided."}</p></div><div className="flex flex-wrap items-center gap-1.5 xl:justify-end">{sla && sla.state !== "ok" && <span title={slaLabel(sla)} className={`rounded-md px-2 py-1 text-xs font-bold ${sla.state === "overdue" ? "bg-red-600 text-white" : "bg-amber-100 text-amber-800"}`}>{sla.state === "overdue" ? "Overdue" : "Breaching"}</span>}<Badge value={inc.status} /><Badge value={inc.severity} /></div><div className="text-xs text-zinc-500"><span className="text-[11px] uppercase tracking-wide text-zinc-400">Owner</span><span className="mt-0.5 block truncate" title={owner}>{owner}</span></div><div className="flex items-center justify-between gap-3 text-xs text-zinc-500 xl:block xl:text-right"><span className="text-[11px] uppercase tracking-wide text-zinc-400">Age</span><span className="mt-0.5 block tabular-nums" title={new Date(inc.created_at).toLocaleString()}>{timeAgo(inc.created_at)}</span><NavigationLink href={`/incidents/${inc.id}`} className="mt-1 inline-block font-medium text-[#285e4a] hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Open incident</NavigationLink></div></div></Card>; })}</div></section>}
+      {!isLoading && !error && rows.length > 0 && <section aria-label="Incident results" aria-busy={isFetching} className={`space-y-2 transition-opacity ${isFetching ? "opacity-70" : ""}`}><div className="flex items-center gap-2 px-1 text-xs text-zinc-500"><input type="checkbox" aria-label={`Select page (${rows.length})`} checked={pageSelected} onChange={(event) => selectPage(event.target.checked)} className="h-4 w-4 accent-[#2a4a33]" /><span>Select page ({rows.length})</span></div><div className="grid gap-2">{rows.map((inc) => { const src = thumbSrc(inc); const location = inc.address ?? `${inc.lat.toFixed(3)}, ${inc.lng.toFixed(3)}`; const sla = slaFor(inc.created_at, inc.severity, inc.status); const duplicates = dupCount.get(inc.id) ?? []; const owner = ownerName(inc.assigned_to); const detailHref = `/incidents/${inc.id}?return_to=${encodeURIComponent(returnTo)}`; return <Card key={inc.id} className="relative overflow-hidden p-3 transition-shadow hover:shadow-md"><span aria-hidden className={`absolute inset-y-0 left-0 w-1 ${SEV_BAR[inc.severity]}`} /><div className="grid gap-3 pl-2 xl:grid-cols-[auto_auto_minmax(18rem,1fr)_minmax(130px,auto)_minmax(105px,auto)_auto] xl:items-center"><input type="checkbox" aria-label={`Select ${inc.title}`} checked={!!selected[inc.id]} onChange={(event) => selectRow(inc.id, event.target.checked)} className="h-4 w-4 accent-[#2a4a33]" /><Thumb src={src} /><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><NavigationLink href={detailHref} className="max-w-full font-semibold text-zinc-900 underline-offset-2 transition hover:text-[#2a4a33] hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">{inc.title}</NavigationLink>{duplicates.length > 0 && <NavigationLink href={`/incidents/${inc.id}#duplicates`} title={duplicates.map((item) => `Score ${item.score} · ${item.distance_m}m · ${item.hours_apart}h apart`).join("\n")} className="rounded-md bg-purple-50 px-1.5 py-0.5 text-[11px] font-bold text-purple-800 hover:bg-purple-100 focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">{duplicates.length} duplicate{duplicates.length > 1 ? "s" : ""}</NavigationLink>}</div><p className="mt-0.5 truncate text-xs text-zinc-500" title={location}>{location}</p><p className="mt-1 line-clamp-2 max-w-2xl text-sm leading-relaxed text-zinc-600">{inc.description || "No description provided."}</p></div><div className="flex flex-wrap items-center gap-1.5 xl:justify-end">{sla && sla.state !== "ok" && <span title={slaLabel(sla)} className={`rounded-md px-2 py-1 text-xs font-bold ${sla.state === "overdue" ? "bg-red-600 text-white" : "bg-amber-100 text-amber-800"}`}>{sla.state === "overdue" ? "Overdue" : "Breaching"}</span>}<Badge value={inc.status} /><Badge value={inc.severity} /></div><div className="text-xs text-zinc-500"><span className="text-[11px] uppercase tracking-wide text-zinc-400">Owner</span><span className="mt-0.5 block truncate" title={owner}>{owner}</span></div><div className="flex items-center justify-between gap-3 text-xs text-zinc-500 xl:block xl:text-right"><span className="text-[11px] uppercase tracking-wide text-zinc-400">Age</span><span className="mt-0.5 block tabular-nums" title={new Date(inc.created_at).toLocaleString()}>{timeAgo(inc.created_at)}</span><NavigationLink href={detailHref} className="mt-1 inline-block font-medium text-[#285e4a] hover:underline focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Open incident</NavigationLink></div></div></Card>; })}</div></section>}
 
       {!isLoading && !error && totalPages > 0 && <nav aria-label="Incident pages" className="flex flex-wrap items-center justify-between gap-3 border-t border-zinc-200 pt-3"><p className="text-xs text-zinc-500">Page {scope.page} of {totalPages}</p><div className="flex items-center gap-2"><button type="button" disabled={scope.page <= 1} onClick={() => replaceScope({ page: scope.page - 1 })} className="rounded-md bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 ring-1 ring-inset ring-zinc-300 transition hover:bg-zinc-100 disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[#2a4a33]">Previous</button><button type="button" disabled={scope.page >= totalPages} onClick={() => replaceScope({ page: scope.page + 1 })} className="rounded-md bg-[#14231a] px-3 py-1.5 text-sm font-medium text-white transition hover:bg-[#2a4a33] disabled:opacity-40 focus:outline-none focus:ring-2 focus:ring-[#2a4a33] focus:ring-offset-2">Next</button></div></nav>}
       {toast && <div role="status" className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-zinc-900 px-4 py-2.5 text-sm text-white shadow-lg">{bulk.isPending ? "Applying…" : toast}</div>}

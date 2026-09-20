@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     # Upload guardrails
     MAX_PHOTO_MB: int = 8
 
+    # Staff invitations (KAN-52/53) — email via Resend. If RESEND_API_KEY is empty,
+    # invitation creation fails closed (no usable invite is left behind).
+    RESEND_API_KEY: str = ""
+    RESEND_FROM_EMAIL: str = ""
+    CRM_PUBLIC_URL: str = ""  # e.g. https://citywatch-crm.vercel.app (invite link base)
+
     # CORS for browser callers (CRM on :3000). Comma-separated extra origins.
     CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
 

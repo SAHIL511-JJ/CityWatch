@@ -67,7 +67,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     queryKey: ["sidebar-needs-review"],
     queryFn: () =>
       apiFetch<{ total: number }>(`/admin/incidents?status=needs_review`),
-    enabled: pathname !== "/login",
+    enabled: pathname !== "/login" && pathname !== "/invite",
     refetchInterval: 60000,
     retry: false,
   });
@@ -89,7 +89,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("click", close);
   }, [userMenu]);
 
-  if (pathname === "/login") return <>{children}</>;
+  if (pathname === "/login" || pathname === "/invite") return <>{children}</>;
 
   const sections: { label: string; items: Item[] }[] = [
     {

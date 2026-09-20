@@ -35,6 +35,24 @@ class Staff(Base):
     email: Mapped[str] = mapped_column(Text, unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(Text)
     role: Mapped[str] = mapped_column(Text, default="dispatcher")
+    availability: Mapped[str] = mapped_column(Text, default="available")
+    availability_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_active_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class StaffInvitation(Base):
+    __tablename__ = "staff_invitations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uid)
+    email: Mapped[str] = mapped_column(Text, index=True)
+    role: Mapped[str] = mapped_column(Text, default="dispatcher")
+    token_hash: Mapped[str] = mapped_column(Text, unique=True, index=True)
+    invited_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("staff.id"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Category(Base):

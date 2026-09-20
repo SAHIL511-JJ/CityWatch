@@ -189,6 +189,17 @@ export interface StaffMember {
   email: string;
   role: string;
   open_count: number;
+  availability?: "available" | "busy" | "away";
+  availability_updated_at?: string | null;
+  last_active_at?: string | null;
+}
+
+export interface StaffWorkspace {
+  active_staff: number;
+  total_staff: number;
+  total_open_workload: number;
+  unassigned_open: number;
+  members: StaffMember[];
 }
 
 export interface DuplicatePair {
