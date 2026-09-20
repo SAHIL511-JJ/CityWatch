@@ -155,7 +155,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen">
       <aside
         className={`sticky top-0 flex h-screen shrink-0 flex-col bg-[#14231a] text-zinc-300 transition-[width] ${
-          collapsed ? "w-16" : "w-60"
+          collapsed ? "w-16" : "w-56"
         } max-sm:w-16 max-sm:overflow-hidden`}
       >
         <div className={`relative flex shrink-0 items-center gap-2.5 px-5 pb-5 pt-6 max-sm:justify-center max-sm:gap-0 max-sm:px-0 ${collapsed ? "flex-col gap-1 px-0" : ""}`}>
@@ -234,7 +234,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex min-w-0 items-center gap-3 overflow-hidden border-b border-[#e8e0d0] bg-[#faf7f0] px-4 py-4 sm:px-8">
+        <header className="flex min-w-0 items-center gap-3 overflow-hidden border-b border-[#e8e0d0] bg-[#faf7f0] px-4 py-3 sm:px-7">
           <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 truncate text-xl">
             <span className="font-medium text-zinc-400">CityWatch</span>
             <span aria-hidden className="text-zinc-300">/</span>
@@ -287,7 +287,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             )}
           </div>
         </header>
-        <main className="flex-1 bg-[#faf7f0] px-4 py-6 sm:px-8">{children}</main>
+        <main className="flex-1 bg-[#faf7f0] px-4 py-4 sm:px-7">{children}</main>
       </div>
     </div>
   );
