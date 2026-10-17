@@ -40,3 +40,6 @@ wt-crm/
 wt-mobile/
 vault_Citywatch/.obsidian/
 vault_Citywatch/
+
+# Local AI client config — never publish
+.codex/
